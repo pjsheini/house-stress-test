@@ -177,6 +177,7 @@ function main(){
   let buildings = [];       // [{groundM, geoms:[geom], height}]
   let areaGrounds = [];     // ground samples inside radius (land %)
   let bldLayerName = null;
+  let pmt = null, pmtMaxZ = 14, VT = null;
   let analyzeToken = 0;
 
   const $ = id => document.getElementById(id);
@@ -285,6 +286,7 @@ function main(){
         const vl=(meta && meta.vector_layers) || [];
         bldLayerName = (vl.find(l=>/building/i.test(l.id) && !/part/i.test(l.id)) || vl[0] || {id:'building'}).id;
         pmProtocol.add(p);
+        pmt = p; pmtMaxZ = Math.min(14, header.maxZoom || 14);
         map.addSource('overture',{type:'vector',url:'pmtiles://'+url,
           attribution:`Buildings: <a href="https://overturemaps.org">© Overture Maps Foundation</a> (${rel})`});
         const h=['coalesce',['get','height'],['*',['coalesce',['get','num_floors'],2],3.2]];
@@ -364,10 +366,13 @@ function main(){
     for(let i=0;i<N;i++)for(let j=0;j<N;j++){
       const u=(i+.5)/N*2-1, v=(j+.5)/N*2-1; if(u*u+v*v<=1) grid.push([c[0]+u*dLng, c[1]+v*dLat]);
     }
-    // buildings from loaded Overture tiles
+    // buildings: read Overture tiles directly for the whole circle (works at any map zoom)
     const byKey=new Map();
     if (map.getSource('overture') && bldLayerName){
-      const feats=map.querySourceFeatures('overture',{sourceLayer:bldLayerName});
+      let feats;
+      try { feats = await fetchBuildings(c, radiusM); }
+      catch(e){ console.warn('Direct tile read failed, using rendered tiles', e); feats = map.querySourceFeatures('overture',{sourceLayer:bldLayerName}); }
+      if (token!==analyzeToken) return;
       for(const f of feats){
         const g=f.geometry; if(!g || (g.type!=='Polygon' && g.type!=='MultiPolygon')) continue;
         const ct=centroid(g); if (hav(c,ct)>radiusM) continue;
@@ -376,7 +381,7 @@ function main(){
         const h=p.height!=null ? +p.height : (p.num_floors!=null ? +p.num_floors*3.2 : 6.4);
         if (byKey.has(key)) byKey.get(key).geoms.push(g);
         else byKey.set(key,{ct,geoms:[g],h:isFinite(h)?h:6.4});
-        if (byKey.size>8000) break;
+        if (byKey.size>15000) break;
       }
     }
     const sample = await preloadElev([...grid, ...[...byKey.values()].map(b=>b.ct)]);
@@ -384,6 +389,30 @@ function main(){
     areaGrounds = grid.map(p=>sample(p[0],p[1])).filter(isFinite);
     buildings = [...byKey.values()].map(b=>({...b, groundM:sample(b.ct[0],b.ct[1])})).filter(b=>isFinite(b.groundM));
     renderArea();
+  }
+
+  async function fetchBuildings(c, r){
+    if (!pmt) throw new Error('no pmtiles');
+    if (!VT){
+      const [vt,pbf]=await Promise.all([
+        import('https://cdn.jsdelivr.net/npm/@mapbox/vector-tile@2/+esm'),
+        import('https://cdn.jsdelivr.net/npm/pbf@4/+esm')]);
+      VT={VectorTile:vt.VectorTile, Pbf:pbf.default||pbf.Pbf};
+    }
+    const z=pmtMaxZ;
+    const dLat=r/111320, dLng=r/(111320*Math.cos(c[1]*Math.PI/180));
+    const a=tilePx(c[0]-dLng,c[1]+dLat,z), b=tilePx(c[0]+dLng,c[1]-dLat,z);
+    const out=[], jobs=[];
+    for(let x=a.x;x<=b.x;x++) for(let y=a.y;y<=b.y;y++){
+      jobs.push(pmt.getZxy(z,x,y).then(res=>{
+        if(!res || !res.data) return;
+        const L=new VT.VectorTile(new VT.Pbf(new Uint8Array(res.data))).layers[bldLayerName];
+        if(!L) return;
+        for(let i=0;i<L.length;i++) out.push(L.feature(i).toGeoJSON(x,y,z));
+      }));
+    }
+    await Promise.all(jobs);
+    return out;
   }
 
   // ---------- rendering ----------
