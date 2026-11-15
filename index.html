@@ -257,9 +257,9 @@ function main(){
       version:8,
       glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sources:{
-        carto:{type:'raster',tileSize:256,
-          tiles:['a','b','c','d'].map(s=>`https://${s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png`),
-          attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>'},
+        carto:{type:'raster',tileSize:256,maxzoom:16,
+          tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
+          attribution:'Basemap © Esri, HERE, Garmin, © OpenStreetMap contributors'},
         dem:{type:'raster-dem',encoding:'terrarium',tileSize:256,maxzoom:15,
           tiles:[TERRARIUM+'{z}/{x}/{y}.png'],
           attribution:'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">AWS Terrain Tiles</a> (USGS 3DEP, SRTM, others)'},
