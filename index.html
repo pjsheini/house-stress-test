@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>House Stress Test — Flood Demo</title>
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0f1720; --panel:#ffffff; --ink:#14202b; --muted:#5d6b78; --line:#e3e8ee;
+    --accent:#1663c7; --c0:#8fb39a; --c1:#ffd166; --c2:#f8961e; --c3:#e63946; --c4:#7b2cbf;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--bg)}
+  #map{position:absolute;inset:0}
+  #panel{position:absolute;top:12px;left:12px;bottom:12px;width:370px;background:var(--panel);border-radius:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:hidden;z-index:2}
+  header{padding:16px 18px 10px;border-bottom:1px solid var(--line)}
+  header h1{font-size:17px;margin:0 0 2px;letter-spacing:-.01em}
+  header p{margin:0;font-size:12px;color:var(--muted)}
+  .scroll{overflow-y:auto;padding:14px 18px 18px;flex:1}
+  .search{position:relative}
+  .search input{width:100%;padding:11px 84px 11px 12px;border:1px solid #cfd7df;border-radius:10px;font:inherit;font-size:14px}
+  .search input:focus{outline:2px solid #b9d3f5;border-color:var(--accent)}
+  .search button{position:absolute;right:5px;top:5px;bottom:5px;border:0;background:var(--accent);color:#fff;border-radius:7px;padding:0 14px;font:inherit;font-weight:600;cursor:pointer}
+  #results{position:absolute;left:0;right:0;top:46px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.12);z-index:5;display:none;max-height:260px;overflow:auto}
+  #results div{padding:9px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid #f1f3f6}
+  #results div:hover{background:#f3f7fd}
+  #results small{color:var(--muted);display:block}
+  .hint{font-size:11.5px;color:var(--muted);margin:6px 2px 0}
+  .block{margin-top:16px}
+  .label{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+  .big{font-size:30px;font-weight:700;color:var(--accent);letter-spacing:-.02em}
+  .big small{font-size:14px;font-weight:600;color:var(--muted)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .chip{border:1px solid #cfd7df;background:#fff;border-radius:999px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .seg{display:inline-flex;border:1px solid #cfd7df;border-radius:8px;overflow:hidden}
+  .seg button{border:0;background:#fff;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .seg button.on{background:var(--accent);color:#fff}
+  .inline{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink)}
+  .inline input[type=number]{width:70px;padding:5px 7px;border:1px solid #cfd7df;border-radius:7px;font:inherit}
+  .card{border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:16px}
+  .card h2{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .status{display:flex;align-items:center;gap:10px}
+  .badge{width:14px;height:14px;border-radius:4px;flex:none}
+  .status b{font-size:18px}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px;margin-top:10px}
+  .kv span:nth-child(odd){color:var(--muted)}
+  .kv span:nth-child(even){font-weight:600;text-align:right}
+  .bar{display:flex;height:14px;border-radius:5px;overflow:hidden;background:#eef1f4;margin:10px 0 6px}
+  .legend{display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;font-size:12px;align-items:center}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+  canvas#curve{width:100%;height:120px;display:block;margin-top:8px}
+  .note{font-size:11px;color:var(--muted);line-height:1.45;margin-top:16px}
+  .loading{color:var(--muted);font-size:13px}
+  #toast{position:absolute;right:14px;top:14px;background:#14202b;color:#fff;font-size:13px;padding:9px 12px;border-radius:9px;z-index:3;display:none;max-width:320px}
+  @media (max-width:760px){
+    #panel{top:auto;left:0;right:0;bottom:0;width:auto;height:55%;border-radius:14px 14px 0 0}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="toast"></div>
+
+<aside id="panel">
+  <header>
+    <h1>🏠 House Stress Test</h1>
+    <p>How high does water have to rise before this place is under water?</p>
+  </header>
+  <div class="scroll">
+    <form class="search" id="searchForm" autocomplete="off">
+      <input id="q" placeholder="Home address or neighborhood…" value="">
+      <button type="submit">Go</button>
+      <div id="results"></div>
+    </form>
+    <div class="hint">Or click anywhere on the map to test that spot.</div>
+
+    <div class="block">
+      <div class="label"><span>Water level (above sea level)</span>
+        <span class="seg" id="unitSeg"><button data-u="ft" class="on">ft</button><button data-u="m">m</button></span>
+      </div>
+      <div class="big" id="levelOut">8.0 <small>ft</small></div>
+      <input type="range" id="level" min="0" max="50" step="0.5" value="8">
+      <div class="row">
+        <button class="chip" data-ft="3">Sea-level rise ~2100 (3 ft)</button>
+        <button class="chip" data-ft="10">Hurricane surge (10 ft)</button>
+        <button class="chip" data-ft="20">Extreme (20 ft)</button>
+        <button class="chip" id="toHome">Water at my door</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="label"><span>Assumptions</span></div>
+      <div class="inline">First floor sits <input type="number" id="ffh" value="1.5" step="0.5" min="0"> <span class="uLbl">ft</span> above ground</div>
+      <div class="inline" style="margin-top:8px">Neighborhood radius
+        <input type="range" id="radius" min="200" max="1200" step="50" value="600" style="flex:1">
+        <span id="radiusOut" style="width:52px;text-align:right">600 m</span>
+      </div>
+    </div>
+
+    <div class="card" id="homeCard"><h2>This property</h2><div class="loading">Search an address or click the map.</div></div>
+    <div class="card" id="areaCard"><h2>Neighborhood</h2><div class="loading">—</div></div>
+
+    <div class="note">
+      <b>How this works:</b> a “bathtub” model. Each spot’s ground elevation (≈10 m resolution in the US from USGS 3DEP via AWS Terrain Tiles) is compared to the water level you pick. It ignores levees, sea walls, drainage, waves and whether low inland spots actually connect to the water, so treat results as a stress test, not a flood-risk rating. Building footprints and heights: Overture Maps. Address search: OpenStreetMap Nominatim.
+    </div>
+  </div>
+</aside>
+
+<script>
+// ---------- load libraries with CDN fallbacks, then start ----------
+const LIBS = [
+  { test: () => window.maplibregl, urls: [
+    'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js',
+    'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js'] },
+  { test: () => window.pmtiles, urls: [
+    'https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js',
+    'https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js',
+    'https://cdn.jsdelivr.net/npm/pmtiles@3.0.7/dist/pmtiles.js'] },
+];
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.async = false;
+    const t = setTimeout(() => rej(new Error('timeout ' + src)), 10000);
+    s.onload = () => { clearTimeout(t); res(); };
+    s.onerror = () => { clearTimeout(t); rej(new Error('failed ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+async function loadLibs(){
+  for (const lib of LIBS){
+    for (const u of lib.urls){
+      if (lib.test()) break;
+      try { await loadScript(u); } catch (e) { console.warn(e.message); }
+    }
+    if (!lib.test()) return false;
+  }
+  return true;
+}
+function showFatal(){
+  document.getElementById('map').innerHTML =
+    '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;color:#fff;text-align:center;font-size:15px;line-height:1.6">' +
+    '<div style="max-width:440px"><b>The map library couldn\'t load.</b><br>' +
+    'This page needs internet access to load MapLibre and the map data. If you\'re viewing it inside a preview pane, ' +
+    'download the file and open it directly in Chrome, Edge, Safari or Firefox. Ad blockers or company firewalls that block CDNs can also cause this.</div></div>';
+}
+loadLibs().then(ok => ok ? main() : showFatal());
+
+function main(){
+(() => {
+  // ---------- constants ----------
+  const FT = 3.28084;
+  const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/';
+  const OVERTURE_RELEASES = ['2026-10-21.0','2026-10-21','2026-09-23.1','2026-09-23.0','2026-09-23','2026-08-19.0','2026-08-19','2026-07-22.0'];
+  const OVERTURE_BASE = 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/';
+  const CLASSES = [
+    {name:'Dry', desc:'Water does not reach the ground', color:'#8fb39a'},
+    {name:'Yard flooded', desc:'Water on the lot, below the first floor', color:'#ffd166'},
+    {name:'Minor', desc:'Up to 2 ft inside', color:'#f8961e'},
+    {name:'Major', desc:'2–6 ft inside', color:'#e63946'},
+    {name:'Severe', desc:'6+ ft inside, first floor submerged', color:'#7b2cbf'},
+  ];
+
+  // ---------- state ----------
+  let units = 'ft';
+  let levelM = 8 / FT;
+  let ffhM = 1.5 / FT;
+  let radiusM = 600;
+  let site = null;          // {lng, lat, label, groundM, kind}
+  let buildings = [];       // [{groundM, geoms:[geom], height}]
+  let areaGrounds = [];     // ground samples inside radius (land %)
+  let bldLayerName = null;
+  let analyzeToken = 0;
+
+  const $ = id => document.getElementById(id);
+  const toast = (msg, ms=3500) => { const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); };
+  const fmtLen = m => units==='ft' ? `${(m*FT).toFixed(1)} ft` : `${m.toFixed(2)} m`;
+
+  // ---------- elevation tiles ----------
+  const elevCache = new Map();
+  function makeCanvas(w,h){
+    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w,h);
+    const c=document.createElement('canvas'); c.width=w; c.height=h; return c;
+  }
+  function loadElevTile(z,x,y){
+    const key=`${z}/${x}/${y}`;
+    if (elevCache.has(key)) return elevCache.get(key);
+    const p = fetch(`${TERRARIUM}${key}.png`)
+      .then(r => { if(!r.ok) throw new Error('elev '+r.status); return r.blob(); })
+      .then(b => createImageBitmap(b))
+      .then(bmp => {
+        const c=makeCanvas(256,256), ctx=c.getContext('2d',{willReadFrequently:true});
+        ctx.drawImage(bmp,0,0);
+        const d=ctx.getImageData(0,0,256,256).data, a=new Float32Array(65536);
+        for(let i=0;i<65536;i++) a[i]=d[4*i]*256 + d[4*i+1] + d[4*i+2]/256 - 32768;
+        a.ready=true; return a;
+      });
+    elevCache.set(key,p);
+    p.then(a => elevCache.set(key, Object.assign(Promise.resolve(a), {arr:a}))).catch(()=>elevCache.delete(key));
+    return p;
+  }
+  function tilePx(lng,lat,z=15){
+    const n=2**z, xf=(lng+180)/360*n, lr=lat*Math.PI/180;
+    const yf=(1-Math.log(Math.tan(lr)+1/Math.cos(lr))/Math.PI)/2*n;
+    const x=Math.floor(xf), y=Math.floor(yf);
+    return {z,x,y,px:Math.min(255,Math.floor((xf-x)*256)),py:Math.min(255,Math.floor((yf-y)*256))};
+  }
+  async function elevAt(lng,lat){
+    const t=tilePx(lng,lat); const a=await loadElevTile(t.z,t.x,t.y); return a[t.py*256+t.px];
+  }
+  async function preloadElev(points){
+    const keys=new Map();
+    for(const [lng,lat] of points){ const t=tilePx(lng,lat); keys.set(`${t.z}/${t.x}/${t.y}`,t); }
+    const arrs=new Map();
+    await Promise.all([...keys].map(([k,t]) => loadElevTile(t.z,t.x,t.y).then(a=>arrs.set(k,a)).catch(()=>{})));
+    return (lng,lat) => { const t=tilePx(lng,lat), a=arrs.get(`${t.z}/${t.x}/${t.y}`); return a ? a[t.py*256+t.px] : NaN; };
+  }
+
+  // ---------- flood overlay protocol ----------
+  maplibregl.addProtocol('flood', async (params) => {
+    const m=params.url.match(/flood:\/\/(\d+)\/(\d+)\/(\d+)\?l=(-?[\d.]+)/);
+    const z=+m[1], x=+m[2], y=+m[3], level=+m[4];
+    const c=makeCanvas(256,256), ctx=c.getContext('2d');
+    const img=ctx.createImageData(256,256), d=img.data;
+    let elev=null; try{ elev=await loadElevTile(z,x,y); }catch(e){}
+    if (elev) for(let i=0;i<65536;i++){
+      const depth=level-elev[i];
+      if (depth>0){
+        const t=Math.min(depth/4,1); // 0..4 m ramp
+        d[4*i]  =Math.round(110-95*t);
+        d[4*i+1]=Math.round(185-130*t);
+        d[4*i+2]=Math.round(255-95*t);
+        d[4*i+3]=Math.round(120+80*t);
+      }
+    }
+    ctx.putImageData(img,0,0);
+    const blob = c.convertToBlob ? await c.convertToBlob({type:'image/png'}) : await new Promise(r=>c.toBlob(r,'image/png'));
+    return {data: await blob.arrayBuffer()};
+  });
+
+  // ---------- map ----------
+  const pmProtocol = new pmtiles.Protocol();
+  maplibregl.addProtocol('pmtiles', pmProtocol.tile);
+
+  const map = new maplibregl.Map({
+    container:'map',
+    center:[-74.0324,40.7440], zoom:14.5, pitch:45, bearing:-17,
+    maxPitch:70, hash:false,
+    style:{
+      version:8,
+      glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+      sources:{
+        carto:{type:'raster',tileSize:256,
+          tiles:['a','b','c','d'].map(s=>`https://${s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png`),
+          attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>'},
+        dem:{type:'raster-dem',encoding:'terrarium',tileSize:256,maxzoom:15,
+          tiles:[TERRARIUM+'{z}/{x}/{y}.png'],
+          attribution:'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">AWS Terrain Tiles</a> (USGS 3DEP, SRTM, others)'},
+        flood:{type:'raster',tileSize:256,maxzoom:15,tiles:[`flood://{z}/{x}/{y}?l=${levelM.toFixed(3)}`]}
+      },
+      layers:[
+        {id:'carto',type:'raster',source:'carto'},
+        {id:'hill',type:'hillshade',source:'dem',paint:{'hillshade-exaggeration':0.35,'hillshade-shadow-color':'#5a6570'}},
+        {id:'flood',type:'raster',source:'flood',paint:{'raster-opacity':0.85,'raster-fade-duration':0}}
+      ]
+    }
+  });
+  map.addControl(new maplibregl.NavigationControl({visualizePitch:true}),'top-right');
+  map.addControl(new maplibregl.ScaleControl({unit:'imperial'}),'bottom-right');
+
+  async function addOvertureBuildings(){
+    for (const rel of OVERTURE_RELEASES){
+      const url=`${OVERTURE_BASE}${rel}/buildings.pmtiles`;
+      try{
+        const p=new pmtiles.PMTiles(url);
+        const header=await p.getHeader();
+        const meta=await p.getMetadata().catch(()=>({}));
+        const vl=(meta && meta.vector_layers) || [];
+        bldLayerName = (vl.find(l=>/building/i.test(l.id) && !/part/i.test(l.id)) || vl[0] || {id:'building'}).id;
+        pmProtocol.add(p);
+        map.addSource('overture',{type:'vector',url:'pmtiles://'+url,
+          attribution:`Buildings: <a href="https://overturemaps.org">© Overture Maps Foundation</a> (${rel})`});
+        const h=['coalesce',['get','height'],['*',['coalesce',['get','num_floors'],2],3.2]];
+        map.addLayer({id:'bld',type:'fill-extrusion',source:'overture','source-layer':bldLayerName,minzoom:13,
+          paint:{'fill-extrusion-color':'#d9dde2','fill-extrusion-height':h,'fill-extrusion-opacity':0.75}});
+        map.addLayer({id:'bld-hit',type:'fill-extrusion',source:'hit',
+          paint:{'fill-extrusion-color':['match',['get','cls'],0,CLASSES[0].color,1,CLASSES[1].color,2,CLASSES[2].color,3,CLASSES[3].color,4,CLASSES[4].color,'#ccc'],
+                 'fill-extrusion-height':['get','h'],'fill-extrusion-opacity':0.92}});
+        console.log('Overture buildings from', url, 'layer', bldLayerName, header.maxZoom);
+        return true;
+      }catch(e){ console.warn('Overture release unavailable:', rel, e); }
+    }
+    toast('Could not load Overture building tiles — elevation & flood map still work.', 6000);
+    return false;
+  }
+
+  map.on('load', async () => {
+    map.addSource('hit',{type:'geojson',data:fc([])});
+    map.addSource('ring',{type:'geojson',data:fc([])});
+    map.addLayer({id:'ring',type:'line',source:'ring',paint:{'line-color':'#1663c7','line-width':2,'line-dasharray':[2,1.5]}});
+    await addOvertureBuildings();
+    selectSite(-74.0324,40.7440,'Hoboken, NJ (demo)','area');
+  });
+
+  map.on('click', e => selectSite(e.lngLat.lng, e.lngLat.lat, `Dropped pin ${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`, 'home'));
+
+  const marker = new maplibregl.Marker({color:'#14202b'});
+
+  // ---------- geometry helpers ----------
+  function fc(f){ return {type:'FeatureCollection',features:f}; }
+  function hav(a,b){ const R=6371000,toR=Math.PI/180,dLat=(b[1]-a[1])*toR,dLng=(b[0]-a[0])*toR;
+    const s=Math.sin(dLat/2)**2+Math.cos(a[1]*toR)*Math.cos(b[1]*toR)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(s)); }
+  function circle(c,r,n=72){ const pts=[]; const dLat=r/111320, dLng=r/(111320*Math.cos(c[1]*Math.PI/180));
+    for(let i=0;i<=n;i++){const t=2*Math.PI*i/n; pts.push([c[0]+dLng*Math.cos(t), c[1]+dLat*Math.sin(t)]);} return pts; }
+  function centroid(g){ const ring = g.type==='Polygon' ? g.coordinates[0] : g.coordinates[0][0];
+    let x=0,y=0,n=Math.max(1,ring.length-1); for(let i=0;i<n;i++){x+=ring[i][0];y+=ring[i][1];} return [x/n,y/n]; }
+
+  // ---------- classification ----------
+  function classify(groundM){
+    const atGround = levelM - groundM;
+    if (!(atGround>0)) return {cls:0, atGround, inside:0};
+    const inside = atGround - ffhM;
+    if (inside<=0) return {cls:1, atGround, inside:0};
+    const insideFt=inside*FT;
+    return {cls: insideFt<=2?2 : insideFt<=6?3 : 4, atGround, inside};
+  }
+
+  // ---------- select & analyze ----------
+  async function selectSite(lng,lat,label,kind,bbox){
+    const token=++analyzeToken;
+    site={lng,lat,label,kind,groundM:null};
+    marker.setLngLat([lng,lat]).addTo(map);
+    if (kind==='area' && bbox){
+      const d=Math.max(hav([bbox[0],lat],[bbox[2],lat]), hav([lng,bbox[1]],[lng,bbox[3]]))/2;
+      radiusM=Math.round(Math.min(1200,Math.max(300,d))/50)*50;
+      $('radius').value=radiusM; $('radiusOut').textContent=radiusM+' m';
+    }
+    $('homeCard').innerHTML='<h2>This property</h2><div class="loading">Reading ground elevation…</div>';
+    $('areaCard').innerHTML='<h2>Neighborhood</h2><div class="loading">Loading buildings…</div>';
+    map.getSource('ring').setData(fc([{type:'Feature',geometry:{type:'LineString',coordinates:circle([lng,lat],radiusM)}}]));
+
+    try{ site.groundM = await elevAt(lng,lat); }catch(e){ site.groundM=NaN; }
+    if (token!==analyzeToken) return;
+    renderHome();
+
+    const pts=circle([lng,lat],radiusM,16);
+    const b=pts.reduce((a,p)=>[Math.min(a[0],p[0]),Math.min(a[1],p[1]),Math.max(a[2],p[0]),Math.max(a[3],p[1])],[180,90,-180,-90]);
+    map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:innerWidth>760?{left:400,top:40,right:40,bottom:40}:{top:30,left:20,right:20,bottom:innerHeight*0.57},maxZoom:16.5,pitch:45,duration:1400});
+    map.once('idle', () => { if (token===analyzeToken) analyzeArea(token); });
+  }
+
+  async function analyzeArea(token){
+    const c=[site.lng,site.lat];
+    // land samples on a grid inside the circle
+    const grid=[]; const N=36;
+    const dLat=radiusM/111320, dLng=radiusM/(111320*Math.cos(c[1]*Math.PI/180));
+    for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+      const u=(i+.5)/N*2-1, v=(j+.5)/N*2-1; if(u*u+v*v<=1) grid.push([c[0]+u*dLng, c[1]+v*dLat]);
+    }
+    // buildings from loaded Overture tiles
+    const byKey=new Map();
+    if (map.getSource('overture') && bldLayerName){
+      const feats=map.querySourceFeatures('overture',{sourceLayer:bldLayerName});
+      for(const f of feats){
+        const g=f.geometry; if(!g || (g.type!=='Polygon' && g.type!=='MultiPolygon')) continue;
+        const ct=centroid(g); if (hav(c,ct)>radiusM) continue;
+        const p=f.properties||{};
+        const key=p.id || f.id || (ct[0].toFixed(5)+','+ct[1].toFixed(5));
+        const h=p.height!=null ? +p.height : (p.num_floors!=null ? +p.num_floors*3.2 : 6.4);
+        if (byKey.has(key)) byKey.get(key).geoms.push(g);
+        else byKey.set(key,{ct,geoms:[g],h:isFinite(h)?h:6.4});
+        if (byKey.size>8000) break;
+      }
+    }
+    const sample = await preloadElev([...grid, ...[...byKey.values()].map(b=>b.ct)]);
+    if (token!==analyzeToken) return;
+    areaGrounds = grid.map(p=>sample(p[0],p[1])).filter(isFinite);
+    buildings = [...byKey.values()].map(b=>({...b, groundM:sample(b.ct[0],b.ct[1])})).filter(b=>isFinite(b.groundM));
+    renderArea();
+  }
+
+  // ---------- rendering ----------
+  function renderHome(){
+    const el=$('homeCard');
+    if (!site){ return; }
+    if (!isFinite(site.groundM)){ el.innerHTML='<h2>This property</h2><div class="loading">No elevation data here.</div>'; return; }
+    const k=classify(site.groundM), C=CLASSES[k.cls];
+    const toGround=site.groundM-levelM, toInside=site.groundM+ffhM-levelM;
+    el.innerHTML=`<h2>This property</h2>
+      <div style="font-size:13px;margin-bottom:8px">${escapeHtml(site.label)}</div>
+      <div class="status"><span class="badge" style="background:${C.color}"></span><b>${C.name}</b></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${C.desc}</div>
+      <div class="kv">
+        <span>Ground elevation</span><span>${fmtLen(site.groundM)}</span>
+        <span>Water depth at ground</span><span>${k.atGround>0?fmtLen(k.atGround):'—'}</span>
+        <span>Water inside (est.)</span><span>${k.inside>0?fmtLen(k.inside):'—'}</span>
+        <span>Water reaches the lot at</span><span>${fmtLen(Math.max(0,site.groundM))}</span>
+        <span>Water gets inside at</span><span>${fmtLen(Math.max(0,site.groundM+ffhM))}</span>
+        <span>${toGround>0?'Margin before flooding':'Over the lot by'}</span><span style="color:${toGround>0?'#2b8a3e':'#c92a2a'}">${fmtLen(Math.abs(toGround))}</span>
+      </div>`;
+  }
+
+  function renderArea(){
+    const el=$('areaCard');
+    if (!site) return;
+    const counts=[0,0,0,0,0], feats=[];
+    for(const b of buildings){
+      const k=classify(b.groundM); counts[k.cls]++;
+      for(const g of b.geoms) feats.push({type:'Feature',geometry:g,properties:{cls:k.cls,h:b.h}});
+    }
+    if (map.getSource('hit')) map.getSource('hit').setData(fc(feats));
+    const nB=buildings.length, wet=nB-counts[0];
+    const landWet = areaGrounds.length ? areaGrounds.filter(g=>g<levelM).length/areaGrounds.length : 0;
+    const flooded = counts[2]+counts[3]+counts[4];
+    const verdict = nB===0 ? (landWet>0.5?'Mostly under water':landWet>0.1?'Partly under water':'Mostly dry')
+      : flooded/nB>0.5 ? 'Most homes take water inside' : flooded/nB>0.15 ? 'Many homes take water inside'
+      : wet/nB>0.15 ? 'Streets & yards flooded, few homes inside' : wet>0 ? 'Isolated flooding' : 'Dry';
+    const sorted=buildings.map(b=>b.groundM).sort((a,b)=>a-b);
+    const median = sorted.length ? sorted[Math.floor(sorted.length/2)] : (areaGrounds.slice().sort((a,b)=>a-b)[Math.floor(areaGrounds.length/2)]);
+    el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2>
+      <div class="status"><b>${verdict}</b></div>
+      <div class="kv">
+        <span>Land under water</span><span>${(landWet*100).toFixed(0)}%</span>
+        <span>Buildings analyzed</span><span>${nB.toLocaleString()}</span>
+        <span>Buildings with water inside</span><span>${nB?((flooded/nB*100).toFixed(0)+'%'):'—'}</span>
+        <span>Median ground elevation</span><span>${isFinite(median)?fmtLen(median):'—'}</span>
+      </div>
+      ${nB?`<div class="bar">${counts.map((n,i)=>n?`<div title="${CLASSES[i].name}: ${n}" style="width:${n/nB*100}%;background:${CLASSES[i].color}"></div>`:'').join('')}</div>
+      <div class="legend">${CLASSES.map((C,i)=>`<i style="background:${C.color}"></i><span>${C.name}</span><span>${counts[i].toLocaleString()}</span>`).join('')}</div>`
+      :`<div class="loading" style="margin-top:8px">No Overture buildings loaded here — zoom in or check your connection.</div>`}
+      <div class="label" style="margin-top:14px"><span>% of buildings with water inside vs. water level</span></div>
+      <canvas id="curve"></canvas>`;
+    drawCurve();
+  }
+
+  function drawCurve(){
+    const cv=$('curve'); if(!cv) return;
+    const dpr=devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+    cv.width=W*dpr; cv.height=H*dpr; const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
+    const maxM=+$('level').max/(units==='ft'?FT:1), pad={l:30,r:8,t:6,b:18}, w=W-pad.l-pad.r, h=H-pad.t-pad.b;
+    const src = buildings.length ? buildings.map(b=>b.groundM+ffhM) : areaGrounds;
+    const s=src.slice().sort((a,b)=>a-b), n=s.length;
+    ctx.font='10px Inter,sans-serif'; ctx.fillStyle='#5d6b78'; ctx.strokeStyle='#e3e8ee'; ctx.lineWidth=1;
+    for(const p of [0,50,100]){ const y=pad.t+h*(1-p/100); ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke(); ctx.fillText(p+'%',2,y+3); }
+    const u=units==='ft'?FT:1; const maxU=maxM*u;
+    for(let t=0;t<=4;t++){ const v=maxU*t/4; ctx.fillText(v.toFixed(0)+(units), pad.l+w*t/4-(t===4?22:t?8:0), H-4); }
+    if(!n) return;
+    ctx.beginPath(); let j=0;
+    for(let i=0;i<=200;i++){ const L=maxM*i/200; while(j<n && s[j]<L) j++; const x=pad.l+w*i/200, y=pad.t+h*(1-j/n); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+    ctx.strokeStyle='#1663c7'; ctx.lineWidth=2; ctx.stroke();
+    const xL=pad.l+w*Math.min(1,levelM/maxM); ctx.strokeStyle='#e63946'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(xL,pad.t); ctx.lineTo(xL,pad.t+h); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // ---------- controls ----------
+  let floodTimer=null;
+  function updateLevelUI(){
+    const v = units==='ft' ? levelM*FT : levelM;
+    $('levelOut').innerHTML = `${v.toFixed(units==='ft'?1:2)} <small>${units}</small>`;
+  }
+  function setLevel(m, fromSlider){
+    levelM=Math.max(0,m);
+    if(!fromSlider) $('level').value = units==='ft' ? levelM*FT : levelM;
+    updateLevelUI(); renderHome(); renderArea();
+    clearTimeout(floodTimer);
+    floodTimer=setTimeout(()=>{ const s=map.getSource('flood'); if(s) s.setTiles([`flood://{z}/{x}/{y}?l=${levelM.toFixed(3)}`]); },120);
+  }
+  $('level').addEventListener('input', e => setLevel(+e.target.value/(units==='ft'?FT:1), true));
+  document.querySelectorAll('[data-ft]').forEach(b => b.addEventListener('click', () => setLevel(+b.dataset.ft/FT)));
+  $('toHome').addEventListener('click', () => { if(site && isFinite(site.groundM)) setLevel(site.groundM+ffhM+0.01); else toast('Pick a property first.'); });
+  $('unitSeg').addEventListener('click', e => {
+    const u=e.target.dataset.u; if(!u||u===units) return;
+    units=u; document.querySelectorAll('#unitSeg button').forEach(b=>b.classList.toggle('on',b.dataset.u===u));
+    const r=$('level'); if(u==='ft'){ r.max=50; r.step=0.5; $('ffh').value=(ffhM*FT).toFixed(1); } else { r.max=15; r.step=0.1; $('ffh').value=ffhM.toFixed(2); }
+    document.querySelectorAll('.uLbl').forEach(s=>s.textContent=u);
+    setLevel(levelM);
+  });
+  $('ffh').addEventListener('input', e => { const v=+e.target.value; if(isFinite(v)){ ffhM = units==='ft'? v/FT : v; renderHome(); renderArea(); } });
+  let radTimer=null;
+  $('radius').addEventListener('input', e => {
+    radiusM=+e.target.value; $('radiusOut').textContent=radiusM+' m';
+    clearTimeout(radTimer); radTimer=setTimeout(()=>{ if(site) selectSite(site.lng,site.lat,site.label,site.kind); },350);
+  });
+
+  // ---------- geocoding (Nominatim) ----------
+  const resBox=$('results');
+  $('searchForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const q=$('q').value.trim(); if(!q) return;
+    resBox.style.display='block'; resBox.innerHTML='<div class="loading">Searching…</div>';
+    try{
+      const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&addressdetails=0&q=${encodeURIComponent(q)}`,{headers:{'Accept-Language':'en'}});
+      const list=await r.json();
+      if(!list.length){ resBox.innerHTML='<div>No matches. Try adding city & state.</div>'; return; }
+      resBox.innerHTML='';
+      list.forEach(it=>{
+        const d=document.createElement('div');
+        const areaTypes=['suburb','neighbourhood','quarter','city','town','village','hamlet','borough','city_district','administrative','postcode','county','island'];
+        const isArea = it.category==='boundary' || (it.category==='place' && areaTypes.includes(it.type)) || areaTypes.includes(it.addresstype);
+        d.innerHTML=`${escapeHtml(it.display_name.split(',').slice(0,2).join(','))}<small>${isArea?'Neighborhood / area':'Address / place'} · ${escapeHtml(it.display_name.split(',').slice(2,5).join(','))}</small>`;
+        d.onclick=()=>{
+          resBox.style.display='none';
+          const bb=it.boundingbox.map(Number); // [s,n,w,e]
+          selectSite(+it.lon,+it.lat,it.display_name.split(',').slice(0,3).join(','), isArea?'area':'home', isArea?[bb[2],bb[0],bb[3],bb[1]]:null);
+        };
+        resBox.appendChild(d);
+      });
+    }catch(err){ resBox.innerHTML='<div>Search failed — check your connection.</div>'; }
+  });
+  document.addEventListener('click', e => { if(!e.target.closest('.search')) resBox.style.display='none'; });
+
+  addEventListener('resize', drawCurve);
+  updateLevelUI();
+})();
+}
+</script>
+</body>
+</html>
