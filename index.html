@@ -58,6 +58,15 @@
   canvas#curve{width:100%;height:120px;display:block;margin-top:8px}
   .note{font-size:11px;color:var(--muted);line-height:1.45;margin-top:16px}
   .loading{color:var(--muted);font-size:13px}
+  .check{display:flex;gap:8px;align-items:center;font-size:13px;margin-top:9px;cursor:pointer}
+  .check input{accent-color:var(--accent);width:15px;height:15px}
+  .seg.wide{display:flex;width:100%}
+  .seg.wide button{flex:1;padding:7px 6px;font-size:12.5px}
+  .sw{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;font-size:12px;margin-top:10px;align-items:center}
+  .sw i{width:14px;height:10px;border-radius:2px;display:inline-block}
+  .fema{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+  .fema .zone{display:inline-block;font-weight:700;padding:2px 8px;border-radius:6px;color:#fff;font-size:12.5px;margin-right:6px}
+  .chip.fema100{border-color:#2f6fde;color:#2f6fde;font-weight:600}
   #toast{position:absolute;right:14px;top:14px;background:#14202b;color:#fff;font-size:13px;padding:9px 12px;border-radius:9px;z-index:3;display:none;max-width:320px}
   @media (max-width:760px){
     #panel{top:auto;left:0;right:0;bottom:0;width:auto;height:55%;border-radius:14px 14px 0 0}
@@ -92,6 +101,25 @@
         <button class="chip" data-ft="10">Hurricane surge (10 ft)</button>
         <button class="chip" data-ft="20">Extreme (20 ft)</button>
         <button class="chip" id="toHome">Water at my door</button>
+        <button class="chip fema100" id="fema100" style="display:none">FEMA 100-year flood</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="label"><span>Flood model</span></div>
+      <div class="seg wide" id="modelSeg">
+        <button data-m="bathtub" class="on">Elevation only</button>
+        <button data-m="noaa">NOAA · connected to sea</button>
+      </div>
+      <div class="hint" id="modelNote">Every spot lower than the water floods, even if it isn't connected to the sea.</div>
+      <label class="check"><input type="checkbox" id="showFema" checked> Show FEMA flood zones &amp; levees</label>
+      <label class="check"><input type="checkbox" id="leveesHold" checked> Assume levees hold</label>
+      <div class="sw" id="femaLegend">
+        <i style="background:#7b2cbf"></i><span>FEMA coastal high-risk (V/VE): 100-yr flood + waves</span>
+        <i style="background:#2f6fde"></i><span>FEMA high-risk (A/AE/AO): 100-yr floodplain</span>
+        <i style="background:#f4a261"></i><span>FEMA moderate risk: 500-yr floodplain</span>
+        <i style="background:#2a9d8f"></i><span>Behind a levee (reduced risk)</span>
+        <i style="background:#6b3e26;height:4px"></i><span>Levee (FEMA)</span>
       </div>
     </div>
 
@@ -108,7 +136,7 @@
     <div class="card" id="areaCard"><h2>Neighborhood</h2><div class="loading">—</div></div>
 
     <div class="note">
-      <b>How this works:</b> a “bathtub” model. Each spot’s ground elevation (≈10 m resolution in the US from USGS 3DEP via AWS Terrain Tiles) is compared to the water level you pick. It ignores levees, sea walls, drainage, waves and whether low inland spots actually connect to the water, so treat results as a stress test, not a flood-risk rating. Building footprints and heights: Overture Maps. Address search: OpenStreetMap Nominatim.
+      <b>How this works:</b> water level is measured from sea level (NAVD88). Each spot's ground elevation (≈10 m resolution in the US, from USGS 3DEP via AWS Terrain Tiles) is compared to it. <b>Elevation only</b> floods every lower spot; <b>NOAA</b> uses NOAA's sea-level-rise maps, which only flood low areas connected to the sea (0–10 ft above local high tide). <b>FEMA</b> flood zones, 100-year flood levels and levees come from FEMA's National Flood Hazard Layer, converted to NAVD88 with NOAA VDatum. "Assume levees hold" treats FEMA levee-protected areas as dry. Sea walls aren't mapped nationally; FEMA and NOAA maps reflect them only where they shaped the official study. A stress test, not an insurance or engineering rating. Building footprints and heights: Overture Maps. Address search: OpenStreetMap Nominatim.
     </div>
   </div>
 </aside>
@@ -166,7 +194,12 @@ function main(){
     {name:'Minor', desc:'Up to 2 ft inside', color:'#f8961e'},
     {name:'Major', desc:'2–6 ft inside', color:'#e63946'},
     {name:'Severe', desc:'6+ ft inside, first floor submerged', color:'#7b2cbf'},
+    {name:'Behind levee', desc:'Low enough to flood, but a levee keeps the water out — if it holds', color:'#2a9d8f'},
   ];
+  const FEMA = 'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer';
+  const NOAA_SLR = 'https://coast.noaa.gov/arcgis/rest/services/dc_slr/';
+  const VDATUM = 'https://vdatum.noaa.gov/vdatumweb/api/convert';
+  const CAT_COLOR = {coastal:'#7b2cbf', high:'#2f6fde', moderate:'#f4a261', levee:'#2a9d8f', low:'#9aa5b1', undetermined:'#9aa5b1', water:'#9ec5e8'};
 
   // ---------- state ----------
   let units = 'ft';
@@ -179,6 +212,16 @@ function main(){
   let bldLayerName = null;
   let pmt = null, pmtMaxZ = 14, VT = null;
   let analyzeToken = 0;
+  // official-map state
+  let model = 'bathtub';          // 'bathtub' | 'noaa'
+  let leveesHold = true, showFema = true;
+  let femaZones = [];             // [{a:attrs, cat, rings, bbox}]
+  let leveedRings = [];           // rings of levee-protected zones (for masking)
+  let maskVer = 0;
+  let siteFema = null;            // {loading, zone, cat, label, desc, bfeM, bfeNote, levee}
+  let mhhwM = null;               // local high tide (MHHW) in m above NAVD88, null = unknown
+  let mhhwLookup = 'idle';        // 'loading' | 'done'
+  let noaaSvc = null, noaaRes = null;   // current NOAA layer + sampled results {svc, site, bld:Int8Array}
 
   const $ = id => document.getElementById(id);
   const toast = (msg, ms=3500) => { const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); };
@@ -225,6 +268,7 @@ function main(){
   }
 
   // ---------- flood overlay protocol ----------
+  function floodUrl(){ return `flood://{z}/{x}/{y}?l=${levelM.toFixed(3)}&m=${maskVer}`; }
   maplibregl.addProtocol('flood', async (params) => {
     const m=params.url.match(/flood:\/\/(\d+)\/(\d+)\/(\d+)\?l=(-?[\d.]+)/);
     const z=+m[1], x=+m[2], y=+m[3], level=+m[4];
@@ -242,6 +286,15 @@ function main(){
       }
     }
     ctx.putImageData(img,0,0);
+    if (leveesHold && leveedRings.length){
+      const n=2**z, toPx=([lng,lat])=>{ const lr=lat*Math.PI/180;
+        return [((lng+180)/360*n - x)*256, ((1-Math.log(Math.tan(lr)+1/Math.cos(lr))/Math.PI)/2*n - y)*256]; };
+      ctx.globalCompositeOperation='destination-out';
+      ctx.beginPath();
+      for(const ring of leveedRings){ ring.forEach((p,i)=>{ const [px,py]=toPx(p); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); }
+      ctx.fill('evenodd');
+      ctx.globalCompositeOperation='source-over';
+    }
     const blob = c.convertToBlob ? await c.convertToBlob({type:'image/png'}) : await new Promise(r=>c.toBlob(r,'image/png'));
     return {data: await blob.arrayBuffer()};
   });
@@ -264,12 +317,15 @@ function main(){
         dem:{type:'raster-dem',encoding:'terrarium',tileSize:256,maxzoom:15,
           tiles:[TERRARIUM+'{z}/{x}/{y}.png'],
           attribution:'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">AWS Terrain Tiles</a> (USGS 3DEP, SRTM, others)'},
-        flood:{type:'raster',tileSize:256,maxzoom:15,tiles:[`flood://{z}/{x}/{y}?l=${levelM.toFixed(3)}`]}
+        flood:{type:'raster',tileSize:256,maxzoom:15,tiles:[floodUrl()]},
+        noaa:{type:'raster',tileSize:256,maxzoom:16,tiles:[NOAA_SLR+'slr_3ft/MapServer/tile/{z}/{y}/{x}'],
+          attribution:'Sea-level rise: <a href="https://coast.noaa.gov/slr/">NOAA Office for Coastal Management</a>'}
       },
       layers:[
         {id:'carto',type:'raster',source:'carto'},
         {id:'hill',type:'hillshade',source:'dem',paint:{'hillshade-exaggeration':0.35,'hillshade-shadow-color':'#5a6570'}},
-        {id:'flood',type:'raster',source:'flood',paint:{'raster-opacity':0.85,'raster-fade-duration':0}}
+        {id:'flood',type:'raster',source:'flood',paint:{'raster-opacity':0.85,'raster-fade-duration':0}},
+        {id:'noaa',type:'raster',source:'noaa',layout:{visibility:'none'},paint:{'raster-opacity':0.9,'raster-fade-duration':0}}
       ]
     }
   });
@@ -306,6 +362,14 @@ function main(){
   map.on('load', async () => {
     map.addSource('hit',{type:'geojson',data:fc([])});
     map.addSource('ring',{type:'geojson',data:fc([])});
+    map.addSource('fema-zones',{type:'geojson',data:fc([]),attribution:'Flood zones &amp; levees: <a href="https://www.fema.gov/flood-maps/national-flood-hazard-layer">FEMA NFHL</a>'});
+    map.addSource('fema-levees',{type:'geojson',data:fc([])});
+    const catColor=['match',['get','cat'],'coastal',CAT_COLOR.coastal,'high',CAT_COLOR.high,'moderate',CAT_COLOR.moderate,'levee',CAT_COLOR.levee,'#9aa5b1'];
+    map.addLayer({id:'fema-fill',type:'fill',source:'fema-zones',filter:['in',['get','cat'],['literal',['coastal','high','moderate','levee']]],
+      paint:{'fill-color':catColor,'fill-opacity':0.22}});
+    map.addLayer({id:'fema-line',type:'line',source:'fema-zones',filter:['in',['get','cat'],['literal',['coastal','high','moderate','levee']]],
+      paint:{'line-color':catColor,'line-width':1.2,'line-opacity':0.8}});
+    map.addLayer({id:'fema-levee',type:'line',source:'fema-levees',paint:{'line-color':'#6b3e26','line-width':4,'line-opacity':0.9}});
     map.addLayer({id:'ring',type:'line',source:'ring',paint:{'line-color':'#1663c7','line-width':2,'line-dasharray':[2,1.5]}});
     await addOvertureBuildings();
     selectSite(-74.0324,40.7440,'Hoboken, NJ (demo)','area');
@@ -325,13 +389,204 @@ function main(){
     let x=0,y=0,n=Math.max(1,ring.length-1); for(let i=0;i<n;i++){x+=ring[i][0];y+=ring[i][1];} return [x/n,y/n]; }
 
   // ---------- classification ----------
-  function classify(groundM){
+  // ctx: {leveed:bool, noaa: 1 = NOAA says flooded & connected, 0 = not, undefined = unknown}
+  function classify(groundM, ctx={}){
     const atGround = levelM - groundM;
     if (!(atGround>0)) return {cls:0, atGround, inside:0};
+    const st = noaaState();
+    if (model==='noaa'){
+      if (st.kind==='below') return {cls:0, atGround:0, inside:0, why:'noaa'};
+      if (st.kind==='ok' && noaaRes && noaaRes.svc===st.svc && ctx.noaa===0) return {cls:0, atGround:0, inside:0, why:'noaa'};
+    }
+    if (leveesHold && ctx.leveed) return {cls:5, atGround, inside:0, why:'levee'};
     const inside = atGround - ffhM;
     if (inside<=0) return {cls:1, atGround, inside:0};
     const insideFt=inside*FT;
     return {cls: insideFt<=2?2 : insideFt<=6?3 : 4, atGround, inside};
+  }
+
+  // ---------- official data: FEMA NFHL, NOAA SLR, NOAA VDatum ----------
+  async function getJSON(url, ms=25000){
+    const ac=new AbortController(); const t=setTimeout(()=>ac.abort(), ms);
+    try{ const r=await fetch(url,{signal:ac.signal}); if(!r.ok) throw new Error(r.status); return await r.json(); }
+    finally{ clearTimeout(t); }
+  }
+  function zoneInfo(a){
+    if(!a) return null;
+    const z=(a.FLD_ZONE||'').toUpperCase(), sub=(a.ZONE_SUBTY||'').toUpperCase();
+    if (z.startsWith('V')) return {cat:'coastal', label:z, desc:'High risk, coastal: the 1%-a-year (100-year) flood plus storm waves. Flood insurance is required for mortgages.'};
+    if (z==='A99') return {cat:'levee', label:z, desc:'High-risk area that will be protected by a levee under construction.'};
+    if (z.startsWith('A')) return {cat:'high', label:z, desc:'High risk: inside the 1%-a-year (100-year) floodplain. Flood insurance is required for mortgages.'};
+    if (z==='X' && sub.includes('LEVEE')) return {cat:'levee', label:'X (levee)', desc:'Moderate risk: protected from the 100-year flood by a levee. Risk remains if the levee is overtopped or fails.'};
+    if (z==='X' && sub.includes('0.2')) return {cat:'moderate', label:'X (shaded)', desc:'Moderate risk: inside the 0.2%-a-year (500-year) floodplain.'};
+    if (z==='X') return {cat:'low', label:'X', desc:'Minimal flood hazard on FEMA maps (outside the 500-year floodplain).'};
+    if (z==='D') return {cat:'undetermined', label:'D', desc:'Possible but undetermined flood hazard — FEMA has not studied this area.'};
+    if (z.includes('WATER')) return {cat:'water', label:'Open water', desc:'Mapped as open water.'};
+    return {cat:'low', label:z||'?', desc:''};
+  }
+  const CAT_RANK={coastal:5, high:4, levee:3, moderate:2, undetermined:1, low:0, water:0};
+  function ringArea(r){ let s=0; for(let i=0,j=r.length-1;i<r.length;j=i++) s+=(r[j][0]-r[i][0])*(r[j][1]+r[i][1]); return s/2; } // >0 = clockwise
+  function esriToGeoJSON(rings){
+    const polys=[]; for(const r of rings){ if(ringArea(r)>0 || !polys.length) polys.push([r]); else polys[polys.length-1].push(r); }
+    return polys.length===1 ? {type:'Polygon',coordinates:polys[0]} : {type:'MultiPolygon',coordinates:polys};
+  }
+  function inRings(pt, rings){ let inside=false; const [x,y]=pt;
+    for(const r of rings) for(let i=0,j=r.length-1;i<r.length;j=i++){
+      const [xi,yi]=r[i],[xj,yj]=r[j];
+      if(((yi>y)!==(yj>y)) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside; }
+    return inside; }
+  function zoneAt(pt){
+    let best=null;
+    for(const z of femaZones){ const b=z.bbox; if(pt[0]<b[0]||pt[0]>b[2]||pt[1]<b[1]||pt[1]>b[3]) continue;
+      if(inRings(pt,z.rings) && (!best || CAT_RANK[z.cat]>CAT_RANK[best.cat])) best=z; }
+    return best;
+  }
+  function envelope(c,r){ const dLat=r/111320, dLng=r/(111320*Math.cos(c[1]*Math.PI/180)); return [c[0]-dLng,c[1]-dLat,c[0]+dLng,c[1]+dLat]; }
+  async function femaForArea(c, r, token){
+    const env=envelope(c, r*1.15).map(v=>v.toFixed(6)).join(',');
+    const base=`geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outSR=4326&returnGeometry=true&geometryPrecision=6&maxAllowableOffset=0.00002&f=json`;
+    const zones=[];
+    for(let page=0; page<4; page++){
+      const j=await getJSON(`${FEMA}/28/query?${base}&outFields=FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE,V_DATUM,DEPTH,LEN_UNIT&resultOffset=${page*1000}&resultRecordCount=1000`);
+      for(const f of (j.features||[])){ const rings=f.geometry?.rings; if(!rings?.length) continue;
+        const info=zoneInfo(f.attributes); let b=[180,90,-180,-90];
+        for(const rg of rings) for(const p of rg){ b=[Math.min(b[0],p[0]),Math.min(b[1],p[1]),Math.max(b[2],p[0]),Math.max(b[3],p[1])]; }
+        zones.push({a:f.attributes, cat:info.cat, info, rings, bbox:b}); }
+      if(!j.exceededTransferLimit) break;
+    }
+    let levees=[];
+    try{ const lj=await getJSON(`${FEMA}/23/query?${base}&outFields=LEVEE_NM,OWNER,LEVEE_TYP,LEVEE_STAT,DGN_FREQ,FREEBOARD,LEN_UNIT`);
+      levees=(lj.features||[]).filter(f=>f.geometry?.paths).map(f=>({type:'Feature',properties:f.attributes,geometry:{type:'MultiLineString',coordinates:f.geometry.paths}})); }
+    catch(e){ console.warn('FEMA levees', e); }
+    if (token!==analyzeToken) return;
+    femaZones=zones;
+    leveedRings=zones.filter(z=>z.cat==='levee').flatMap(z=>z.rings);
+    map.getSource('fema-zones').setData(fc(zones.filter(z=>z.cat!=='low' && z.cat!=='water').map(z=>({type:'Feature',properties:{cat:z.cat},geometry:esriToGeoJSON(z.rings)}))));
+    map.getSource('fema-levees').setData(fc(levees));
+    femaLevees=levees;
+    maskVer++; refreshOverlays();
+  }
+  let femaLevees=[], femaAreaPromise=null, mhhwFor=null;
+
+  async function vdatum(lng,lat,z,sv,tv){
+    const hf = sv==='NGVD29' ? 'NAD27' : 'NAD83_2011';
+    const u=`${VDATUM}?s_x=${lng}&s_y=${lat}&s_z=${z}&region=contiguous&s_h_frame=${hf}&s_coor=geo&s_v_frame=${sv}&s_v_unit=us_ft&t_h_frame=${hf}&t_coor=geo&t_v_frame=${tv}&t_v_unit=us_ft`;
+    const j=await getJSON(u, 15000); const v=parseFloat(j.t_z);
+    return (isFinite(v) && v>-9999) ? v : null;   // feet
+  }
+  async function toNavd88Ft(valFt, datum, lng, lat){
+    const d=(datum||'').toUpperCase();
+    if (d.includes('NAVD')) return {ft:valFt, note:''};
+    if (d.includes('NGVD')){ try{ const v=await vdatum(lng,lat,valFt,'NGVD29','NAVD88'); if(v!=null) return {ft:v, note:`converted from ${valFt} ft NGVD29`}; }catch(e){} return {ft:null, note:`${valFt} ft on the older NGVD29 datum (couldn't convert)`}; }
+    return {ft:null, note: datum?`${valFt} ft (${datum})`:''};
+  }
+  async function findMhhw(lng,lat){
+    // VDatum's tide grids only cover water, so search outward from the site
+    for (const d of [0, 0.006, 0.015, 0.03, 0.06]){
+      const pts = d===0 ? [[lng,lat]] : [0,45,90,135,180,225,270,315].map(a=>[lng+d*Math.cos(a*Math.PI/180)/Math.cos(lat*Math.PI/180), lat+d*Math.sin(a*Math.PI/180)]);
+      const vals=(await Promise.all(pts.map(p=>vdatum(p[0].toFixed(5),p[1].toFixed(5),0,'MHHW','NAVD88').catch(()=>null)))).filter(v=>v!=null);
+      if (vals.length) return vals.reduce((a,b)=>a+b,0)/vals.length/FT;  // meters
+    }
+    return null;
+  }
+  function distToLine(pt, paths){ // meters, equirectangular
+    const k=Math.cos(pt[1]*Math.PI/180)*111320, m=111320; let best=Infinity;
+    for(const p of paths) for(let i=1;i<p.length;i++){
+      const ax=(p[i-1][0]-pt[0])*k, ay=(p[i-1][1]-pt[1])*m, bx=(p[i][0]-pt[0])*k, by=(p[i][1]-pt[1])*m;
+      const dx=bx-ax, dy=by-ay, L=dx*dx+dy*dy; let t=L?-(ax*dx+ay*dy)/L:0; t=Math.max(0,Math.min(1,t));
+      best=Math.min(best, Math.hypot(ax+t*dx, ay+t*dy)); }
+    return best; }
+  async function femaForProperty(lng,lat,token){
+    siteFema={loading:true}; renderHome();
+    try{
+      const j=await getJSON(`${FEMA}/28/query?geometry=${lng},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=FLD_ZONE,ZONE_SUBTY,SFHA_TF,STATIC_BFE,V_DATUM,DEPTH,LEN_UNIT&returnGeometry=false&f=json`);
+      if (token!==analyzeToken) return;
+      const feats=(j.features||[]).map(f=>f.attributes).map(a=>({a,info:zoneInfo(a)})).sort((x,y)=>CAT_RANK[y.info.cat]-CAT_RANK[x.info.cat]);
+      if(!feats.length){ siteFema={none:true}; renderHome(); return; }
+      const {a,info}=feats[0]; const sf={zone:a, ...info, bfeM:null, bfeNote:''};
+      const unit=(a.LEN_UNIT||'Feet').toLowerCase().startsWith('m')?FT:1;
+      if (a.STATIC_BFE>-9000){
+        const r=await toNavd88Ft(a.STATIC_BFE*unit, a.V_DATUM, lng, lat); sf.bfeM=r.ft!=null?r.ft/FT:null; sf.bfeNote=r.note;
+      } else if (a.DEPTH>0 && isFinite(site.groundM)){
+        sf.bfeM=site.groundM + a.DEPTH*unit/FT; sf.bfeNote=`${a.DEPTH*unit} ft deep flooding (zone AO) added to ground elevation`;
+      } else if (info.cat==='high' || info.cat==='coastal'){
+        // riverine: base flood elevation varies — use nearest BFE line within ~400 m
+        const e=envelope([lng,lat],400).map(v=>v.toFixed(6)).join(',');
+        const bj=await getJSON(`${FEMA}/16/query?geometry=${e}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=ELEV,LEN_UNIT,V_DATUM&returnGeometry=true&outSR=4326&f=json`);
+        const near=(bj.features||[]).filter(f=>f.geometry?.paths && f.attributes.ELEV>-9000)
+          .map(f=>({f, d:distToLine([lng,lat],f.geometry.paths)})).sort((p,q)=>p.d-q.d)[0];
+        if (near){ const u2=(near.f.attributes.LEN_UNIT||'Feet').toLowerCase().startsWith('m')?FT:1;
+          const r=await toNavd88Ft(near.f.attributes.ELEV*u2, near.f.attributes.V_DATUM, lng, lat);
+          sf.bfeM=r.ft!=null?r.ft/FT:null; sf.bfeNote=`from the nearest FEMA flood-elevation line, ${Math.round(near.d)} m away${r.note?'; '+r.note:''}`; }
+        else sf.bfeNote='FEMA did not publish a flood elevation here (approximate zone A)';
+      }
+      if (token!==analyzeToken) return;
+      siteFema=sf;
+    }catch(e){ console.warn('FEMA property lookup', e); if (token===analyzeToken) siteFema={error:true}; }
+    renderHome(); updateFemaButton();
+  }
+  function updateFemaButton(){
+    const b=$('fema100'); const ok=siteFema && siteFema.bfeM!=null;
+    b.style.display=ok?'':'none';
+    if(ok) b.textContent=`FEMA 100-year flood (${fmtLen(siteFema.bfeM)})`;
+  }
+
+  // NOAA sea-level-rise layers: 0–10 ft above local high tide (MHHW) in half-foot steps
+  function noaaState(){
+    if (mhhwM==null) return {kind:'unknown'};
+    const v=Math.round((levelM-mhhwM)*FT*2)/2;
+    if (v<0) return {kind:'below', v};
+    if (v>10) return {kind:'above', v};
+    return {kind:'ok', v, svc:'slr_'+String(v).replace('.','_')+'ft'};
+  }
+  const noaaTiles=new Map();
+  function loadNoaaTile(svc,z,x,y){
+    const key=`${svc}/${z}/${x}/${y}`; if(noaaTiles.has(key)) return noaaTiles.get(key);
+    const p=fetch(`${NOAA_SLR}${svc}/MapServer/tile/${z}/${y}/${x}`).then(r=>r.ok?r.blob():null).then(async b=>{
+      if(!b) return null; const bmp=await createImageBitmap(b); const c=makeCanvas(256,256), g=c.getContext('2d',{willReadFrequently:true});
+      g.drawImage(bmp,0,0); return g.getImageData(0,0,256,256).data; }).catch(()=>null);
+    noaaTiles.set(key,p); return p;
+  }
+  function noaaPx(d,px,py){ if(!d) return 0; const i=4*(py*256+px); if(d[i+3]<40) return 0; return d[i+2]>d[i+1] ? 1 : 0; } // blue = flooded & connected; green = low-lying but cut off
+  let noaaToken=0;
+  async function refreshNoaa(){
+    if (model!=='noaa'){ return; }
+    const st=noaaState(); updateModelNote();
+    if (st.kind!=='ok' || !site){ renderHome(); renderArea(); return; }
+    if (noaaRes && noaaRes.svc===st.svc && noaaRes.site===site && noaaRes.blds===buildings) return;
+    const my=++noaaToken, z=15, blds=buildings, grid=areaGrid;
+    const pts=[[site.lng,site.lat], ...blds.map(b=>b.ct), ...grid.map(o=>o.p)];
+    const tiles=new Map(); for(const p of pts){ const t=tilePx(p[0],p[1],z); tiles.set(`${t.x}/${t.y}`,t); }
+    const arrs=new Map(); await Promise.all([...tiles].map(([k,t])=>loadNoaaTile(st.svc,z,t.x,t.y).then(d=>arrs.set(k,d))));
+    if (my!==noaaToken) return;
+    const sample=p=>{ const t=tilePx(p[0],p[1],z); return noaaPx(arrs.get(`${t.x}/${t.y}`),t.px,t.py); };
+    noaaRes={svc:st.svc, site, blds, siteVal:sample(pts[0]),
+      bld:Int8Array.from(blds.map(b=>sample(b.ct))), grid:Int8Array.from(grid.map(o=>sample(o.p))), gridRef:grid};
+    renderHome(); renderArea();
+  }
+  function refreshOverlays(){
+    const st=noaaState();
+    const useNoaa = model==='noaa' && st.kind!=='above';
+    const fs=map.getSource('flood'); if(fs) fs.setTiles([floodUrl()]);
+    if (map.getLayer('flood')) map.setLayoutProperty('flood','visibility', useNoaa?'none':'visible');
+    if (map.getLayer('noaa')){
+      const show = model==='noaa' && st.kind==='ok';
+      map.setLayoutProperty('noaa','visibility', show?'visible':'none');
+      if (show) map.getSource('noaa').setTiles([`${NOAA_SLR}${st.svc}/MapServer/tile/{z}/{y}/{x}`]);
+    }
+    for (const id of ['fema-fill','fema-line','fema-levee']) if (map.getLayer(id)) map.setLayoutProperty(id,'visibility', showFema?'visible':'none');
+    updateModelNote();
+  }
+  function updateModelNote(){
+    const el=$('modelNote'); if(!el) return;
+    if (model==='bathtub'){ el.textContent='Every spot lower than the water floods, even if it isn\'t connected to the sea.'; return; }
+    const st=noaaState();
+    const hi = mhhwM==null ? '' : `Local high tide (MHHW) here is ${fmtLen(mhhwM)} above sea level. `;
+    el.textContent = st.kind==='unknown'
+        ? (mhhwLookup==='loading' ? 'Looking up local high tide from NOAA…' : 'No NOAA tide data here (NOAA maps cover the coast only), so this uses elevation only.')
+      : st.kind==='below' ? hi+'This water level is below the daily high tide, so NOAA shows no new flooding.'
+      : st.kind==='above' ? hi+'NOAA maps only go up to 10 ft above high tide; showing elevation-only flooding instead.'
+      : hi+`Showing NOAA's map for ${st.v} ft above high tide. Only low areas connected to the sea flood.`;
   }
 
   // ---------- select & analyze ----------
@@ -347,10 +602,19 @@ function main(){
     $('homeCard').innerHTML='<h2>This property</h2><div class="loading">Reading ground elevation…</div>';
     $('areaCard').innerHTML='<h2>Neighborhood</h2><div class="loading">Loading buildings…</div>';
     map.getSource('ring').setData(fc([{type:'Feature',geometry:{type:'LineString',coordinates:circle([lng,lat],radiusM)}}]));
+    // reset official-map state for the new place
+    siteFema=null; femaZones=[]; leveedRings=[]; noaaRes=null; buildings=[]; updateFemaButton();
+    femaAreaPromise = femaForArea([lng,lat], radiusM, token).catch(e=>{ console.warn('FEMA area', e); toast('FEMA flood maps did not load for this area (their server may be slow). Elevation results still work.', 6000); });
+    if (!mhhwFor || hav(mhhwFor,[lng,lat])>3000){
+      mhhwM=null; mhhwLookup='loading'; mhhwFor=[lng,lat]; updateModelNote();
+      findMhhw(lng,lat).then(v=>{ if(token!==analyzeToken) return; mhhwM=v; mhhwLookup='done'; refreshOverlays(); refreshNoaa(); renderHome(); renderArea(); })
+        .catch(()=>{ mhhwLookup='done'; updateModelNote(); });
+    }
 
     try{ site.groundM = await elevAt(lng,lat); }catch(e){ site.groundM=NaN; }
     if (token!==analyzeToken) return;
     renderHome();
+    femaForProperty(lng,lat,token);
 
     const pts=circle([lng,lat],radiusM,16);
     const b=pts.reduce((a,p)=>[Math.min(a[0],p[0]),Math.min(a[1],p[1]),Math.max(a[2],p[0]),Math.max(a[3],p[1])],[180,90,-180,-90]);
@@ -386,10 +650,19 @@ function main(){
     }
     const sample = await preloadElev([...grid, ...[...byKey.values()].map(b=>b.ct)]);
     if (token!==analyzeToken) return;
-    areaGrounds = grid.map(p=>sample(p[0],p[1])).filter(isFinite);
+    areaGrid = grid.map(p=>({p, g:sample(p[0],p[1])})).filter(o=>isFinite(o.g));
+    areaGrounds = areaGrid.map(o=>o.g);
     buildings = [...byKey.values()].map(b=>({...b, groundM:sample(b.ct[0],b.ct[1])})).filter(b=>isFinite(b.groundM));
     renderArea();
+    refreshNoaa();
+    // attach FEMA zones to each building once FEMA answers
+    if (femaAreaPromise) await femaAreaPromise;
+    if (token!==analyzeToken) return;
+    for (const b of buildings) b.fema = zoneAt(b.ct);
+    for (const o of areaGrid) o.fema = zoneAt(o.p);
+    renderArea(); renderHome();
   }
+  let areaGrid = [];
 
   async function fetchBuildings(c, r){
     if (!pmt) throw new Error('no pmtiles');
@@ -420,12 +693,14 @@ function main(){
     const el=$('homeCard');
     if (!site){ return; }
     if (!isFinite(site.groundM)){ el.innerHTML='<h2>This property</h2><div class="loading">No elevation data here.</div>'; return; }
-    const k=classify(site.groundM), C=CLASSES[k.cls];
+    const k=classify(site.groundM, siteCtx()), C=CLASSES[k.cls];
     const toGround=site.groundM-levelM, toInside=site.groundM+ffhM-levelM;
+    const desc = k.why==='noaa' ? 'Low enough, but NOAA\'s map shows no connection to the sea here at this level' : C.desc;
     el.innerHTML=`<h2>This property</h2>
       <div style="font-size:13px;margin-bottom:8px">${escapeHtml(site.label)}</div>
       <div class="status"><span class="badge" style="background:${C.color}"></span><b>${C.name}</b></div>
-      <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${C.desc}</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${desc}</div>
+      ${femaHtml()}
       <div class="kv">
         <span>Ground elevation</span><span>${fmtLen(site.groundM)}</span>
         <span>Water depth at ground</span><span>${k.atGround>0?fmtLen(k.atGround):'—'}</span>
@@ -436,18 +711,58 @@ function main(){
       </div>`;
   }
 
+  function noaaOk(){ return model==='noaa' && noaaRes && noaaRes.site===site && noaaRes.blds===buildings; }
+  function siteCtx(){
+    const z = siteFema && siteFema.cat ? siteFema : zoneAt([site.lng,site.lat]);
+    return {leveed: z?.cat==='levee', noaa: (noaaRes && noaaRes.site===site) ? noaaRes.siteVal : undefined};
+  }
+  function femaHtml(){
+    const f=siteFema;
+    if (!f) return '';
+    if (f.loading) return `<div class="fema loading">Checking FEMA flood maps…</div>`;
+    if (f.error) return `<div class="fema loading">FEMA flood maps didn't respond — try again in a moment.</div>`;
+    if (f.none) return `<div class="fema loading">No FEMA flood map covers this spot.</div>`;
+    let rows='';
+    if (f.bfeM!=null && isFinite(site.groundM)){
+      const d=f.bfeM-site.groundM, inside=d-ffhM;
+      rows=`<div class="kv">
+        <span>FEMA 100-year flood level</span><span>${fmtLen(f.bfeM)}</span>
+        <span>In a 100-year flood</span><span style="color:${d>0?'#c92a2a':'#2b8a3e'}">${d>0 ? fmtLen(d)+' at ground'+(inside>0?', '+fmtLen(inside)+' inside':'') : 'ground stays '+fmtLen(-d)+' above'}</span>
+      </div>`;
+    }
+    let lev='';
+    if (f.cat==='levee' && femaLevees.length){
+      const near=femaLevees.map(l=>({l, d:distToLine([site.lng,site.lat], l.geometry.coordinates)})).sort((a,b)=>a.d-b.d)[0];
+      const p=near.l.properties||{};
+      lev=`<div style="font-size:12px;margin-top:6px">Nearest levee: <b>${escapeHtml(p.LEVEE_NM||'unnamed')}</b>${p.OWNER?' ('+escapeHtml(p.OWNER)+')':''}, ~${near.d<1000?Math.round(near.d)+' m':(near.d/1000).toFixed(1)+' km'} away</div>`;
+    }
+    return `<div class="fema">
+      <div><span class="zone" style="background:${CAT_COLOR[f.cat]||'#9aa5b1'}">FEMA zone ${escapeHtml(f.label)}</span></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:6px">${f.desc}</div>
+      ${rows}
+      ${f.bfeNote?`<div style="font-size:11px;color:var(--muted);margin-top:4px">${escapeHtml(f.bfeNote)}</div>`:''}
+      ${lev}
+    </div>`;
+  }
+
   function renderArea(){
     const el=$('areaCard');
     if (!site) return;
-    const counts=[0,0,0,0,0], feats=[];
-    for(const b of buildings){
-      const k=classify(b.groundM); counts[k.cls]++;
+    const counts=CLASSES.map(()=>0), feats=[];
+    const nOk=noaaOk();
+    buildings.forEach((b,i)=>{
+      const k=classify(b.groundM, {leveed:b.fema?.cat==='levee', noaa: nOk ? noaaRes.bld[i] : undefined}); counts[k.cls]++;
       for(const g of b.geoms) feats.push({type:'Feature',geometry:g,properties:{cls:k.cls,h:b.h}});
-    }
+    });
     if (map.getSource('hit')) map.getSource('hit').setData(fc(feats));
-    const nB=buildings.length, wet=nB-counts[0];
-    const landWet = areaGrounds.length ? areaGrounds.filter(g=>g<levelM).length/areaGrounds.length : 0;
+    const nB=buildings.length, wet=nB-counts[0]-counts[5];
+    const gridOk = nOk && noaaRes.gridRef===areaGrid;
+    const landWet = areaGrid.length ? areaGrid.filter((o,i)=>{
+      const c=classify(o.g,{leveed:o.fema?.cat==='levee', noaa: gridOk?noaaRes.grid[i]:undefined}).cls; return c>0 && c!==5; }).length/areaGrid.length : 0;
     const flooded = counts[2]+counts[3]+counts[4];
+    const femaReady = buildings.some(b=>'fema' in b);
+    const inHigh = buildings.filter(b=>b.fema && (b.fema.cat==='high'||b.fema.cat==='coastal')).length;
+    const behindLevee = buildings.filter(b=>b.fema?.cat==='levee').length;
     const verdict = nB===0 ? (landWet>0.5?'Mostly under water':landWet>0.1?'Partly under water':'Mostly dry')
       : flooded/nB>0.5 ? 'Most homes take water inside' : flooded/nB>0.15 ? 'Many homes take water inside'
       : wet/nB>0.15 ? 'Streets & yards flooded, few homes inside' : wet>0 ? 'Isolated flooding' : 'Dry';
@@ -460,6 +775,8 @@ function main(){
         <span>Buildings analyzed</span><span>${nB.toLocaleString()}</span>
         <span>Buildings with water inside</span><span>${nB?((flooded/nB*100).toFixed(0)+'%'):'—'}</span>
         <span>Median ground elevation</span><span>${isFinite(median)?fmtLen(median):'—'}</span>
+        ${nB && femaReady ? `<span>In FEMA 100-year floodplain</span><span>${(inHigh/nB*100).toFixed(0)}%</span>
+        <span>Behind levees (FEMA)</span><span>${(behindLevee/nB*100).toFixed(0)}%</span>` : nB ? `<span>FEMA flood zones</span><span class="loading">loading…</span>` : ''}
       </div>
       ${nB?`<div class="bar">${counts.map((n,i)=>n?`<div title="${CLASSES[i].name}: ${n}" style="width:${n/nB*100}%;background:${CLASSES[i].color}"></div>`:'').join('')}</div>
       <div class="legend">${CLASSES.map((C,i)=>`<i style="background:${C.color}"></i><span>${C.name}</span><span>${counts[i].toLocaleString()}</span>`).join('')}</div>`
@@ -474,7 +791,8 @@ function main(){
     const dpr=devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
     cv.width=W*dpr; cv.height=H*dpr; const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
     const maxM=+$('level').max/(units==='ft'?FT:1), pad={l:30,r:8,t:6,b:18}, w=W-pad.l-pad.r, h=H-pad.t-pad.b;
-    const src = buildings.length ? buildings.map(b=>b.groundM+ffhM) : areaGrounds;
+    // levee-protected buildings never take water while "levees hold" is on (they count as dry at every level)
+    const src = buildings.length ? buildings.map(b=>(leveesHold && b.fema?.cat==='levee') ? Infinity : b.groundM+ffhM) : areaGrounds;
     const s=src.slice().sort((a,b)=>a-b), n=s.length;
     ctx.font='10px Inter,sans-serif'; ctx.fillStyle='#5d6b78'; ctx.strokeStyle='#e3e8ee'; ctx.lineWidth=1;
     for(const p of [0,50,100]){ const y=pad.t+h*(1-p/100); ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke(); ctx.fillText(p+'%',2,y+3); }
@@ -495,13 +813,14 @@ function main(){
   function updateLevelUI(){
     const v = units==='ft' ? levelM*FT : levelM;
     $('levelOut').innerHTML = `${v.toFixed(units==='ft'?1:2)} <small>${units}</small>`;
+    updateFemaButton(); updateModelNote();
   }
   function setLevel(m, fromSlider){
     levelM=Math.max(0,m);
     if(!fromSlider) $('level').value = units==='ft' ? levelM*FT : levelM;
     updateLevelUI(); renderHome(); renderArea();
     clearTimeout(floodTimer);
-    floodTimer=setTimeout(()=>{ const s=map.getSource('flood'); if(s) s.setTiles([`flood://{z}/{x}/{y}?l=${levelM.toFixed(3)}`]); },120);
+    floodTimer=setTimeout(()=>{ refreshOverlays(); refreshNoaa(); },120);
   }
   $('level').addEventListener('input', e => setLevel(+e.target.value/(units==='ft'?FT:1), true));
   document.querySelectorAll('[data-ft]').forEach(b => b.addEventListener('click', () => setLevel(+b.dataset.ft/FT)));
@@ -513,6 +832,14 @@ function main(){
     document.querySelectorAll('.uLbl').forEach(s=>s.textContent=u);
     setLevel(levelM);
   });
+  $('modelSeg').addEventListener('click', e => {
+    const m=e.target.dataset.m; if(!m||m===model) return;
+    model=m; document.querySelectorAll('#modelSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+    refreshOverlays(); renderHome(); renderArea(); refreshNoaa();
+  });
+  $('showFema').addEventListener('change', e => { showFema=e.target.checked; $('femaLegend').style.display=showFema?'':'none'; refreshOverlays(); });
+  $('leveesHold').addEventListener('change', e => { leveesHold=e.target.checked; maskVer++; refreshOverlays(); renderHome(); renderArea(); });
+  $('fema100').addEventListener('click', () => { if(siteFema && siteFema.bfeM!=null) setLevel(siteFema.bfeM); });
   $('ffh').addEventListener('input', e => { const v=+e.target.value; if(isFinite(v)){ ffhM = units==='ft'? v/FT : v; renderHome(); renderArea(); } });
   let radTimer=null;
   $('radius').addEventListener('input', e => {
