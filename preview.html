@@ -51,6 +51,7 @@
   .status b{font-size:18px}
   .kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px;margin-top:10px}
   .kv span:nth-child(odd){color:var(--muted)}
+  .kv small{font-size:10.5px;opacity:.8}
   .kv span:nth-child(even){font-weight:600;text-align:right}
   .bar{display:flex;height:14px;border-radius:5px;overflow:hidden;background:#eef1f4;margin:10px 0 6px}
   .legend{display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;font-size:12px;align-items:center}
@@ -136,7 +137,7 @@
     <div class="card" id="areaCard"><h2>Neighborhood</h2><div class="loading">—</div></div>
 
     <div class="note">
-      <b>How this works:</b> water level is measured from sea level (NAVD88). Each spot's ground elevation (≈10 m resolution in the US, from USGS 3DEP via AWS Terrain Tiles) is compared to it. <b>Elevation only</b> floods every lower spot; <b>NOAA</b> uses NOAA's sea-level-rise maps, which only flood low areas connected to the sea (0–10 ft above local high tide). <b>FEMA</b> flood zones, 100-year flood levels and levees come from FEMA's National Flood Hazard Layer, converted to NAVD88 with NOAA VDatum. "Assume levees hold" treats FEMA levee-protected areas as dry. Sea walls aren't mapped nationally; FEMA and NOAA maps reflect them only where they shaped the official study. A stress test, not an insurance or engineering rating. Building footprints and heights: Overture Maps. Address search: OpenStreetMap Nominatim.
+      <b>How this works:</b> water level is measured from sea level (NAVD88). Ground elevations for the property and each building come from USGS 3DEP (lidar-based, 1–10 m) where available; the blue map shading uses coarser AWS Terrain Tiles, so it can differ slightly, especially below sea level. <b>Elevation only</b> floods every lower spot; <b>NOAA</b> uses NOAA's sea-level-rise maps, which only flood low areas connected to the sea (0–10 ft above local high tide). <b>FEMA</b> flood zones, 100-year flood levels and levees come from FEMA's National Flood Hazard Layer, converted to NAVD88 with NOAA VDatum. "Assume levees hold" treats FEMA levee-protected areas as dry. Sea walls aren't mapped nationally; FEMA and NOAA maps reflect them only where they shaped the official study. A stress test, not an insurance or engineering rating. Building footprints and heights: Overture Maps. Address search: OpenStreetMap Nominatim.
     </div>
   </div>
 </aside>
@@ -406,6 +407,28 @@ function main(){
   }
 
   // ---------- official data: FEMA NFHL, NOAA SLR, NOAA VDatum ----------
+  // USGS 3DEP (lidar-based, NAVD88) point elevations — more accurate than the map tiles, esp. below sea level
+  const USGS_3DEP='https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/getSamples';
+  async function usgsSamples(points){
+    const out=new Float64Array(points.length).fill(NaN), B=500, batches=[];
+    for(let i=0;i<points.length;i+=B) batches.push(i);
+    let next=0;
+    async function worker(){
+      while(next<batches.length){
+        const start=batches[next++], pts=points.slice(start,start+B);
+        const body=new URLSearchParams({geometry:JSON.stringify({points:pts,spatialReference:{wkid:4326}}),
+          geometryType:'esriGeometryMultipoint', returnFirstValueOnly:'true', f:'json'});
+        try{
+          const ac=new AbortController(); const t=setTimeout(()=>ac.abort(),30000);
+          const j=await (await fetch(USGS_3DEP,{method:'POST',body,signal:ac.signal})).json(); clearTimeout(t);
+          for(const s of (j.samples||[])){ const v=parseFloat(s.value); if(isFinite(v) && v>-1000) out[start+s.locationId]=v; }
+        }catch(e){ console.warn('USGS 3DEP batch failed', e); }
+      }
+    }
+    await Promise.all([worker(),worker(),worker(),worker()]);
+    return out;
+  }
+
   async function getJSON(url, ms=25000){
     const ac=new AbortController(); const t=setTimeout(()=>ac.abort(), ms);
     try{ const r=await fetch(url,{signal:ac.signal}); if(!r.ok) throw new Error(r.status); return await r.json(); }
@@ -613,7 +636,9 @@ function main(){
 
     try{ site.groundM = await elevAt(lng,lat); }catch(e){ site.groundM=NaN; }
     if (token!==analyzeToken) return;
+    site.elevSrc='tiles';
     renderHome();
+    usgsSamples([[lng,lat]]).then(v=>{ if(token!==analyzeToken || !isFinite(v[0])) return; site.groundM=v[0]; site.elevSrc='usgs'; renderHome(); renderArea(); updateFemaButton(); });
     femaForProperty(lng,lat,token);
 
     const pts=circle([lng,lat],radiusM,16);
@@ -653,8 +678,18 @@ function main(){
     areaGrid = grid.map(p=>({p, g:sample(p[0],p[1])})).filter(o=>isFinite(o.g));
     areaGrounds = areaGrid.map(o=>o.g);
     buildings = [...byKey.values()].map(b=>({...b, groundM:sample(b.ct[0],b.ct[1])})).filter(b=>isFinite(b.groundM));
+    areaElevSrc='tiles';
     renderArea();
     refreshNoaa();
+    // upgrade ground elevations to USGS 3DEP where available
+    usgsSamples([...buildings.map(b=>b.ct), ...areaGrid.map(o=>o.p)]).then(v=>{
+      if (token!==analyzeToken) return;
+      let n=0; buildings.forEach((b,i)=>{ if(isFinite(v[i])){ b.groundM=v[i]; n++; } });
+      areaGrid.forEach((o,i)=>{ const x=v[buildings.length+i]; if(isFinite(x)) o.g=x; });
+      areaGrounds=areaGrid.map(o=>o.g);
+      if (n > buildings.length*0.5) areaElevSrc='usgs';
+      renderArea();
+    });
     // attach FEMA zones to each building once FEMA answers
     if (femaAreaPromise) await femaAreaPromise;
     if (token!==analyzeToken) return;
@@ -662,7 +697,7 @@ function main(){
     for (const o of areaGrid) o.fema = zoneAt(o.p);
     renderArea(); renderHome();
   }
-  let areaGrid = [];
+  let areaGrid = [], areaElevSrc = 'tiles';
 
   async function fetchBuildings(c, r){
     if (!pmt) throw new Error('no pmtiles');
@@ -702,7 +737,7 @@ function main(){
       <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${desc}</div>
       ${femaHtml()}
       <div class="kv">
-        <span>Ground elevation</span><span>${fmtLen(site.groundM)}</span>
+        <span>Ground elevation ${site.elevSrc==='usgs'?'<small>(USGS 3DEP)</small>':'<small>(map tiles, refining…)</small>'}</span><span>${fmtLen(site.groundM)}</span>
         <span>Water depth at ground</span><span>${k.atGround>0?fmtLen(k.atGround):'—'}</span>
         <span>Water inside (est.)</span><span>${k.inside>0?fmtLen(k.inside):'—'}</span>
         <span>Water reaches the lot at</span><span>${fmtLen(Math.max(0,site.groundM))}</span>
@@ -774,7 +809,7 @@ function main(){
         <span>Land under water</span><span>${(landWet*100).toFixed(0)}%</span>
         <span>Buildings analyzed</span><span>${nB.toLocaleString()}</span>
         <span>Buildings with water inside</span><span>${nB?((flooded/nB*100).toFixed(0)+'%'):'—'}</span>
-        <span>Median ground elevation</span><span>${isFinite(median)?fmtLen(median):'—'}</span>
+        <span>Median ground elevation ${areaElevSrc==='usgs'?'<small>(USGS 3DEP)</small>':'<small>(map tiles, refining…)</small>'}</span><span>${isFinite(median)?fmtLen(median):'—'}</span>
         ${nB && femaReady ? `<span>In FEMA 100-year floodplain</span><span>${(inHigh/nB*100).toFixed(0)}%</span>
         <span>Behind levees (FEMA)</span><span>${(behindLevee/nB*100).toFixed(0)}%</span>` : nB ? `<span>FEMA flood zones</span><span class="loading">loading…</span>` : ''}
       </div>
