@@ -109,10 +109,10 @@
     <div class="block">
       <div class="label"><span>Flood model</span></div>
       <div class="seg wide" id="modelSeg">
-        <button data-m="bathtub" class="on">Elevation only</button>
-        <button data-m="noaa">NOAA · connected to sea</button>
+        <button data-m="noaa" class="on">NOAA · connected to sea</button>
+        <button data-m="bathtub">Elevation only</button>
       </div>
-      <div class="hint" id="modelNote">Every spot lower than the water floods, even if it isn't connected to the sea.</div>
+      <div class="hint" id="modelNote">Looking up local high tide from NOAA…</div>
       <label class="check"><input type="checkbox" id="showFema" checked> Show FEMA flood zones &amp; levees</label>
       <label class="check"><input type="checkbox" id="leveesHold" checked> Assume levees hold</label>
       <div class="sw" id="femaLegend">
@@ -214,7 +214,7 @@ function main(){
   let pmt = null, pmtMaxZ = 14, VT = null;
   let analyzeToken = 0;
   // official-map state
-  let model = 'bathtub';          // 'bathtub' | 'noaa'
+  let model = 'noaa';             // 'noaa' (default) | 'bathtub'
   let leveesHold = true, showFema = true;
   let femaZones = [];             // [{a:attrs, cat, rings, bbox}]
   let leveedRings = [];           // rings of levee-protected zones (for masking)
@@ -736,12 +736,13 @@ function main(){
       <div class="status"><span class="badge" style="background:${C.color}"></span><b>${C.name}</b></div>
       <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${desc}</div>
       ${femaHtml()}
+      ${leveeHint()}
       <div class="kv">
         <span>Ground elevation ${site.elevSrc==='usgs'?'<small>(USGS 3DEP)</small>':'<small>(map tiles, refining…)</small>'}</span><span>${fmtLen(site.groundM)}</span>
         <span>Water depth at ground</span><span>${k.atGround>0?fmtLen(k.atGround):'—'}</span>
         <span>Water inside (est.)</span><span>${k.inside>0?fmtLen(k.inside):'—'}</span>
-        <span>Water reaches the lot at</span><span>${fmtLen(Math.max(0,site.groundM))}</span>
-        <span>Water gets inside at</span><span>${fmtLen(Math.max(0,site.groundM+ffhM))}</span>
+        ${site.groundM<0 ? `<span>Below sea level</span><span style="color:#c92a2a">dry only thanks to levees &amp; pumps</span>` : `<span>Water reaches the lot at</span><span>${fmtLen(site.groundM)}</span>`}
+        <span>Water gets inside at</span><span>${fmtLen(site.groundM+ffhM)}</span>
         <span>${toGround>0?'Margin before flooding':'Over the lot by'}</span><span style="color:${toGround>0?'#2b8a3e':'#c92a2a'}">${fmtLen(Math.abs(toGround))}</span>
       </div>`;
   }
@@ -750,6 +751,10 @@ function main(){
   function siteCtx(){
     const z = siteFema && siteFema.cat ? siteFema : zoneAt([site.lng,site.lat]);
     return {leveed: z?.cat==='levee', noaa: (noaaRes && noaaRes.site===site) ? noaaRes.siteVal : undefined};
+  }
+  function leveeHint(){
+    if (model!=='bathtub' || !femaLevees.length) return '';
+    return `<div style="font-size:12px;margin-top:8px;padding:7px 9px;background:#fff7e6;border-radius:8px">FEMA shows levees near here. The <b>NOAA</b> model accounts for them; elevation-only floods everything below the water line.</div>`;
   }
   function femaHtml(){
     const f=siteFema;
