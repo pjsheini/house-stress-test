@@ -743,7 +743,9 @@ function main(){
         <span>Water inside (est.)</span><span>${k.inside>0?fmtLen(k.inside):'—'}</span>
         ${site.groundM<0 ? `<span>Below sea level</span><span style="color:#c92a2a">dry only thanks to levees &amp; pumps</span>` : `<span>Water reaches the lot at</span><span>${fmtLen(site.groundM)}</span>`}
         <span>Water gets inside at</span><span>${fmtLen(site.groundM+ffhM)}</span>
-        <span>${toGround>0?'Margin before flooding':'Over the lot by'}</span><span style="color:${toGround>0?'#2b8a3e':'#c92a2a'}">${fmtLen(Math.abs(toGround))}</span>
+        ${toGround>0 ? `<span>Margin before flooding</span><span style="color:#2b8a3e">${fmtLen(toGround)}</span>`
+          : k.why ? `<span>Water level is above this ground by</span><span style="color:#b7791f">${fmtLen(-toGround)} — held back</span>`
+          : `<span>Over the lot by</span><span style="color:#c92a2a">${fmtLen(-toGround)}</span>`}
       </div>`;
   }
 
