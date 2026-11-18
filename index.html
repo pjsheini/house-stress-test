@@ -104,6 +104,7 @@
         <button data-s="rain">🌧️ Heavy rain</button>
         <button data-s="hurricane">🌀 Hurricane</button>
         <button data-s="fire">🔥 Wildfire</button>
+        <button data-s="quake">🌎 Earthquake</button>
       </div>
     </div>
 
@@ -184,6 +185,26 @@
       <div class="block">
         <div class="label"><span>Wildfire</span></div>
         <div class="hint" style="margin-top:0">Wildfire risk to homes, how likely a fire is, how intense it could get, and whether flames or embers could reach each building — from the USDA Forest Service <b>Wildfire Risk to Communities</b> maps (2024 data, 30 m). Each place is ranked against all land in the US.</div>
+      </div>
+    </div>
+
+    <div id="quakePanel" style="display:none">
+      <div class="block">
+        <div class="label"><span>Earthquake</span></div>
+        <div class="inline">Over the next
+          <select id="qkYears" class="sel">
+            <option value="30" selected>30 years (a mortgage)</option>
+            <option value="50">50 years</option>
+            <option value="100">100 years</option>
+          </select></div>
+        <div class="inline" style="margin-top:8px">Ground under the house
+          <select id="qkVs30" class="sel">
+            <option value="760">Rock</option>
+            <option value="360">Firm soil or soft rock</option>
+            <option value="260" selected>Typical soil (most homes)</option>
+            <option value="185">Soft soil, bay mud or fill</option>
+          </select></div>
+        <div class="hint">Shaking odds from the USGS 2023 National Seismic Hazard Model. Softer ground shakes harder. Faults from the USGS Quaternary Fault database; liquefaction, landslide and fault-rupture zones from the California Geological Survey (California only).</div>
       </div>
     </div>
 
@@ -679,8 +700,9 @@ function main(){
       map.setLayoutProperty('nhc','visibility', showN?'visible':'none');
       if (showN && map.getSource('nhc').tiles?.[0]!==`${NHC(hurCat)}/tile/{z}/{y}/{x}`) map.getSource('nhc').setTiles([`${NHC(hurCat)}/tile/{z}/{y}/{x}`]);
     }
-    if (map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility', (!sea && scenario!=='fire' && scen?.pond)?'visible':'none');
+    if (map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility', (!sea && scenario!=='fire' && scenario!=='quake' && scen?.pond)?'visible':'none');
     if (map.getLayer('wfire')) map.setLayoutProperty('wfire','visibility', scenario==='fire'?'visible':'none');
+    for (const id of ['qk-faults','qk-zones']) if (map.getLayer(id)) map.setLayoutProperty(id,'visibility', scenario==='quake'?'visible':'none');
     updateScenLegend();
     if (map.getLayer('noaa')){
       const show = sea && model==='noaa' && st.kind==='ok';
@@ -843,6 +865,11 @@ function main(){
     const my=++scenToken, s=site, needRain = scenario==='rain' || hurRain;
     if(!scen || scen.site!==s) scen={site:s};
     scenBusy=true; setScenStatus('Working…'); renderHome(); renderArea();
+    if (scenario==='quake'){
+      try{ await runQuake(); }catch(e){ console.warn('quake', e); scen.quake=scen.quake||{}; scen.quake.curves=scen.quake.curves||{}; scen.quake.curves[qkCfg.vs30]={failed:true}; scen.quake.zones=scen.quake.zones||{liq:[],slide:[],ap:[]}; }
+      if(my!==scenToken) return;
+      scenBusy=false; setScenStatus(''); refreshOverlays(); renderHome(); renderArea(); updateScenarioPanel(); return;
+    }
     if (scenario==='fire'){
       try{ if(!scen.fire || scen.fire.blds!==buildings){ setScenStatus('Reading Forest Service wildfire maps…'); await runFire(); } }
       catch(e){ console.warn('wildfire', e); scen.fire={failed:true, blds:buildings}; }
@@ -893,7 +920,9 @@ function main(){
     let h='';
     if (scenario==='hurricane') h+=`<i style="background:rgb(0,92,230)"></i><span>Surge: under 3 ft above ground</span><i style="background:#ffff00"></i><span>Surge: more than 3 ft</span>
       <i style="background:#ffaa00"></i><span>Surge: more than 6 ft</span><i style="background:#ff0000"></i><span>Surge: more than 9 ft</span>`;
-    if (scenario==='fire') h+=FIRE_CLASSES.map(C=>`<i style="background:${C.color}"></i><span>Buildings: ${C.name.toLowerCase()} wildfire risk</span>`).join('')
+    if (scenario==='quake') h+=QUAKE_CLASSES.map(C=>`<i style="background:${C.color}"></i><span>${C.name}${C.key==='none'?'':' (California)'}</span>`).join('')
+      +`<i style="background:#c92a2a;height:4px"></i><span>Fault active in the last 15,000 years</span><i style="background:#f08c00;height:4px"></i><span>Fault active in the last 130,000 years</span><i style="background:#e0b100;height:4px"></i><span>Older Quaternary fault</span>`;
+    else if (scenario==='fire') h+=FIRE_CLASSES.map(C=>`<i style="background:${C.color}"></i><span>Buildings: ${C.name.toLowerCase()} wildfire risk</span>`).join('')
       +`<i style="background:linear-gradient(90deg,#f1f2a0,#f2c13c,#e8590c)"></i><span>Map shading: Forest Service risk to homes (darker = higher)</span>`;
     else if (scen?.pond) h+=`<i style="background:rgb(80,170,255)"></i><span>Pooled rainwater: shallow</span><i style="background:rgb(20,60,195)"></i><span>Pooled rainwater: 3 ft or deeper</span>`;
     el.innerHTML=h; el.style.display=h?'':'none';
@@ -1048,6 +1077,147 @@ function main(){
       <div style="font-size:11px;color:var(--muted);margin-top:5px">FEMA National Risk Index (${escapeHtml(a.NRI_VER||'')}) compares this tract with others nationwide; it covers the whole tract, not just this house.</div></div>`;
   }
 
+  // =====================================================================
+  //  Earthquake: USGS NSHM 2023 shaking odds, USGS Quaternary faults, CGS seismic hazard zones
+  // =====================================================================
+  const qkCfg={years:30, vs30:260};
+  const QFAULTS='https://earthquake.usgs.gov/arcgis/rest/services/haz/Qfaults/MapServer/21';
+  const CGS = n => `https://services2.arcgis.com/zr3KAIbsRSUyARHG/ArcGIS/rest/services/${n}/FeatureServer/0`;
+  // Modified Mercalli intensity from peak ground acceleration (USGS ShakeMap scale)
+  const MMI=[ {mmi:'IV',  min:0.0124, name:'Light',       desc:'felt indoors by many; dishes rattle'},
+              {mmi:'V',   min:0.039,  name:'Moderate',    desc:'felt by nearly everyone; some dishes and windows break'},
+              {mmi:'VI',  min:0.092,  name:'Strong',      desc:'felt by all; furniture moves; plaster cracks, slight damage'},
+              {mmi:'VII', min:0.18,   name:'Very strong', desc:'slight damage to well-built homes, considerable damage to poorly built ones; chimneys break'},
+              {mmi:'VIII',min:0.34,   name:'Severe',      desc:'considerable damage to ordinary buildings, partial collapse of weak ones'},
+              {mmi:'IX',  min:0.65,   name:'Violent',     desc:'heavy damage even to well-designed buildings; houses shift off foundations'},
+              {mmi:'X+',  min:1.24,   name:'Extreme',     desc:'most masonry and frame structures destroyed'} ];
+  const QUAKE_CLASSES=[
+    {key:'none', name:'Shaking only', desc:'No mapped ground-failure zone', color:'#cdbf8f'},
+    {key:'liq',  name:'Liquefaction zone', desc:'Wet, loose ground can turn to quicksand and sink or tilt buildings', color:'#6741d9'},
+    {key:'slide',name:'Landslide zone', desc:'Slopes may slide in strong shaking', color:'#8d5524'},
+    {key:'ap',   name:'Fault-rupture zone', desc:'Within a state fault zone where the ground surface itself can break', color:'#c92a2a'} ];
+  function nshmModel(lng,lat){
+    if (lat>=50 && lng<=-129) return 'alaska-2023.R1';
+    if (lat<23 && lng<=-154) return 'hawaii-2021.R1';
+    if (lat>=17 && lat<=19 && lng>=-68 && lng<=-64) return 'prvi-2025.R1';
+    if (lng>=-125 && lng<=-65 && lat>=24.4 && lat<=50) return 'conus-2023.R2';
+    return null; }
+  function lambdaAt(xs,ys,x){   // annual exceedance rate, log-log interpolation
+    if (x<=xs[0]) return ys[0]; if (x>=xs[xs.length-1]) return ys[ys.length-1]*Math.pow(x/xs[xs.length-1], -3);
+    for(let i=1;i<xs.length;i++) if(x<=xs[i]){ const t=Math.log(x/xs[i-1])/Math.log(xs[i]/xs[i-1]);
+      return Math.exp(Math.log(Math.max(ys[i-1],1e-12))+t*(Math.log(Math.max(ys[i],1e-12))-Math.log(Math.max(ys[i-1],1e-12)))); }
+    return ys[ys.length-1]; }
+  function pgaAtRate(xs,ys,rate){
+    for(let i=1;i<xs.length;i++) if(ys[i]<=rate){ const t=Math.log(rate/ys[i-1])/Math.log(ys[i]/ys[i-1]); return Math.exp(Math.log(xs[i-1])+t*Math.log(xs[i]/xs[i-1])); }
+    return xs[xs.length-1]; }
+  function mmiOf(pga){ let m=null; for(const x of MMI) if(pga>=x.min) m=x; return m; }
+  const inCA=(lng,lat)=> lng>-124.6 && lng<-114 && lat>32.4 && lat<42.1;
+  async function queryPolys(url, env){
+    const j=await getJSON(`${url}/query?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=OBJECTID&returnGeometry=true&outSR=4326&geometryPrecision=6&maxAllowableOffset=0.00002&f=json`);
+    return (j.features||[]).filter(f=>f.geometry?.rings).map(f=>{ let b=[180,90,-180,-90];
+      for(const r of f.geometry.rings) for(const p of r) b=[Math.min(b[0],p[0]),Math.min(b[1],p[1]),Math.max(b[2],p[0]),Math.max(b[3],p[1])];
+      return {rings:f.geometry.rings, bbox:b}; }); }
+  const inAny=(pt,polys)=>polys.some(z=>pt[0]>=z.bbox[0]&&pt[0]<=z.bbox[2]&&pt[1]>=z.bbox[1]&&pt[1]<=z.bbox[3]&&inRings(pt,z.rings));
+  async function runQuake(){
+    const s=site, q=scen.quake || (scen.quake={});
+    const model=nshmModel(s.lng,s.lat);
+    // 1. shaking odds (cached per soil type)
+    q.curves=q.curves||{};
+    if (model && !q.curves[qkCfg.vs30]){
+      setScenStatus('Asking the USGS seismic hazard model (a few seconds)…');
+      const j=await getJSON(`https://earthquake.usgs.gov/ws/nshmp/${model}/dynamic/hazard/${s.lng.toFixed(4)}/${s.lat.toFixed(4)}/${qkCfg.vs30}?imt=PGA`, 60000);
+      const v=j.response?.hazardCurves?.[0]?.data?.find(d=>d.component==='Total')?.values;
+      q.curves[qkCfg.vs30] = v ? {xs:v.xs, ys:v.ys} : {failed:true};
+    }
+    q.model=model;
+    // 2. faults within ~60 km, and 3. California zones within the neighbourhood (once per site)
+    if (!q.faults){
+      setScenStatus('Finding nearby faults…');
+      const env=envelope([s.lng,s.lat],100000).map(v=>v.toFixed(5)).join(',');
+      try{ const j=await getJSON(`${QFAULTS}/query?geometry=${env}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=fault_name,section_name,age,slip_rate,slip_sense,fault_url&returnGeometry=true&outSR=4326&maxAllowableOffset=0.0003&f=json`);
+        q.faults=(j.features||[]).filter(f=>f.geometry?.paths).map(f=>({a:f.attributes, paths:f.geometry.paths, d:distToLine([s.lng,s.lat], f.geometry.paths)})).sort((x,y)=>x.d-y.d); }
+      catch(e){ console.warn('faults', e); q.faults=[]; q.faultsFailed=true; }
+    }
+    if (!q.zones){
+      q.zones={liq:[], slide:[], ap:[], ca:inCA(s.lng,s.lat)};
+      if (q.zones.ca){ setScenStatus('Checking California seismic hazard zones…');
+        const env=envelope([s.lng,s.lat],radiusM*1.15).map(v=>v.toFixed(6)).join(',');
+        const [liq,slide,ap]=await Promise.all(['CGS_Liquefaction_Zones','CGS_Landslide_Zones','CGS_Alquist_Priolo_Fault_Zones'].map(n=>queryPolys(CGS(n),env).catch(e=>{ console.warn(n,e); return []; })));
+        Object.assign(q.zones,{liq,slide,ap}); }
+    }
+    q.blds=buildings;
+    q.bldClass=Int8Array.from(buildings.map(b=>quakeClassAt(b.ct)));
+    drawQuakeLayers();
+  }
+  function quakeClassAt(pt){ const z=scen?.quake?.zones; if(!z) return 0; return inAny(pt,z.ap)?3 : inAny(pt,z.slide)?2 : inAny(pt,z.liq)?1 : 0; }
+  function quakeOdds(){ const c=scen?.quake?.curves?.[qkCfg.vs30]; if(!c||c.failed) return null; const T=qkCfg.years;
+    const P=x=>1-Math.exp(-lambdaAt(c.xs,c.ys,x)*T);
+    const design=pgaAtRate(c.xs,c.ys,1/2475);
+    return {vi:P(0.092), vii:P(0.18), viii:P(0.34), ix:P(0.65), design, designMmi:mmiOf(design)}; }
+  const pctTxt=p=> p==null?'—' : p<0.005?'under 1%' : p>0.995?'over 99%' : Math.round(p*100)+'%';
+  const FAULT_AGE=a=>{ a=(a||'').toLowerCase(); return a.includes('historic')?'ruptured in historic times' : a.includes('latest')?'active in the last 15,000 years'
+    : a.startsWith('late')?'active in the last 130,000 years' : a.includes('middle')?'active in the last 750,000 years' : a?'active in the last 1.6 million years':''; };
+  function quakeHomeHtml(head){
+    const q=scen.quake, o=quakeOdds(), T=qkCfg.years;
+    if(!q.model) return head+`<div class="loading">The USGS hazard model doesn't cover this location.</div>`+nriHtml();
+    if(!o) return head+`<div class="loading">The USGS hazard model didn't respond — try again in a moment.</div>`+nriHtml();
+    const head2 = o.vii>=0.35 ? ['#a61e4d','High'] : o.vii>=0.10 ? ['#e8590c','Elevated'] : o.vii>=0.02 ? ['#f4a340','Moderate'] : ['#8fb39a','Low'];
+    const k=quakeClassAt([site.lng,site.lat]), C=QUAKE_CLASSES[k], nf=q.faults?.[0];
+    const dist=d=> d<1000?Math.round(d)+' m':(d/1000).toFixed(d<10000?1:0)+' km';
+    return head+`<div class="status"><span class="badge" style="background:${head2[0]}"></span><b>Earthquake risk: ${head2[1]}</b></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${pctTxt(o.vii)} chance of damaging shaking (intensity VII or stronger) here in the next ${T} years.</div>
+      <div class="kv">
+        <span>Strong shaking, slight damage (VI+)</span><span>${pctTxt(o.vi)}</span>
+        <span>Damaging shaking (VII+)</span><span>${pctTxt(o.vii)}</span>
+        <span>Severe shaking (VIII+)</span><span>${pctTxt(o.viii)}</span>
+        <span>Violent shaking (IX+)</span><span>${pctTxt(o.ix)}</span>
+        <span style="grid-column:1/3;font-size:11.5px">Chances over ${T} years on ${$('qkVs30').selectedOptions[0].text.toLowerCase()}. The rare "design" earthquake here (2% chance in 50 years) would bring <b>${o.designMmi?o.designMmi.mmi+' — '+o.designMmi.name.toLowerCase():'light'}</b> shaking: ${o.designMmi?o.designMmi.desc:'little damage'}.</span>
+        <span>Nearest known active fault</span><span>${nf?dist(nf.d):q.faultsFailed?'didn\'t load':'none mapped within 100 km'}</span>
+        ${nf?`<span style="grid-column:1/3;font-size:11.5px">${escapeHtml(nf.a.fault_name||'Unnamed fault')}${nf.a.section_name?' ('+escapeHtml(nf.a.section_name)+')':''} — ${FAULT_AGE(nf.a.age)}${nf.a.slip_rate && !/unspecified/i.test(nf.a.slip_rate)?', slip rate '+escapeHtml(nf.a.slip_rate.toLowerCase()):''}.</span>`:''}
+        ${!nf&&!q.faultsFailed&&o.vii>=0.02?`<span style="grid-column:1/3;font-size:11.5px">The shaking risk here comes from earthquake zones without mapped surface faults (for example New Madrid in the central US) or from distant large faults.</span>`:''}
+        <span>Ground failure at this lot</span><span>${q.zones.ca ? (k?C.name:'none mapped') : 'not mapped here'}</span>
+        ${k?`<span style="grid-column:1/3;font-size:11.5px">${C.desc}. Inside a California Geological Survey hazard zone: sellers must disclose it, and new construction needs a site investigation.</span>`:''}
+        ${!q.zones.ca?`<span style="grid-column:1/3;font-size:11.5px">Liquefaction and landslide zones are loaded for California only so far; check your state geological survey.</span>`:''}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">USGS National Seismic Hazard Model (${escapeHtml(q.model)}). Intensities are estimated from peak ground acceleration.</div>
+      ${femaHtml()}`;
+  }
+  function renderQuakeArea(el){
+    const q=scen.quake, counts=QUAKE_CLASSES.map(()=>0), feats=[];
+    buildings.forEach((b,i)=>{ const k=(q.blds===buildings && q.bldClass)?q.bldClass[i]:0; counts[k]++;
+      for(const g of b.geoms) feats.push({type:'Feature',geometry:g,properties:{cls:0,color:QUAKE_CLASSES[k].color,h:b.h}}); });
+    if (map.getSource('hit')) map.getSource('hit').setData(fc(feats));
+    const nB=buildings.length, o=quakeOdds(), gf=counts[1]+counts[2]+counts[3];
+    const near=(q.faults||[]).filter((f,i,a)=>a.findIndex(g=>g.a.fault_name===f.a.fault_name)===i).slice(0,3);
+    el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2>
+      <div class="status"><b>${!q.zones.ca ? 'Shaking risk is about the same across the neighborhood' : gf/Math.max(1,nB)>0.3 ? 'Much of the neighborhood is on ground that can fail' : gf>0 ? 'Some buildings sit in ground-failure zones' : 'No mapped ground-failure zones nearby'}</b></div>
+      <div class="kv">
+        <span>Buildings analyzed</span><span>${nB.toLocaleString()}</span>
+        ${o?`<span>Damaging shaking in ${qkCfg.years} yrs</span><span>${pctTxt(o.vii)}</span>`:''}
+        ${q.zones.ca?`<span>In a liquefaction zone</span><span>${nB?Math.round(counts[1]/nB*100)+'%':'—'}</span>
+        <span>In a landslide zone</span><span>${nB?Math.round(counts[2]/nB*100)+'%':'—'}</span>
+        <span>In a fault-rupture zone</span><span>${nB?Math.round(counts[3]/nB*100)+'%':'—'}</span>`:''}
+      </div>
+      ${nB&&q.zones.ca?`<div class="bar">${counts.map((n,i)=>n?`<div title="${QUAKE_CLASSES[i].name}: ${n}" style="width:${n/nB*100}%;background:${QUAKE_CLASSES[i].color}"></div>`:'').join('')}</div>
+      <div class="legend">${QUAKE_CLASSES.map((C,i)=>`<i style="background:${C.color}"></i><span>${C.name}</span><span>${counts[i].toLocaleString()}</span>`).join('')}</div>`:''}
+      ${near.length?`<div class="label" style="margin-top:14px"><span>Nearest active faults</span></div>
+      <div style="font-size:12.5px;line-height:1.5">${near.map(f=>`<div><b>${escapeHtml(f.a.fault_name||'Unnamed')}</b> · ${f.d<1000?Math.round(f.d)+' m':(f.d/1000).toFixed(1)+' km'} · ${FAULT_AGE(f.a.age)}</div>`).join('')}</div>`:''}`;
+  }
+  function drawQuakeLayers(){
+    const q=scen?.quake; if(!q) return;
+    if(!map.getSource('qk-faults')){
+      map.addSource('qk-faults',{type:'geojson',data:fc([]),attribution:'Faults: <a href="https://www.usgs.gov/programs/earthquake-hazards/faults">USGS Quaternary Fault and Fold Database</a>'});
+      map.addSource('qk-zones',{type:'geojson',data:fc([]),attribution:'Seismic hazard zones: <a href="https://www.conservation.ca.gov/cgs/geohazards/eq-zapp">California Geological Survey</a>'});
+      map.addLayer({id:'qk-zones',type:'fill',source:'qk-zones',paint:{'fill-color':['get','color'],'fill-opacity':0.28}},'ring');
+      map.addLayer({id:'qk-faults',type:'line',source:'qk-faults',paint:{'line-color':['get','color'],'line-width':3,'line-opacity':0.9}},'ring');
+    }
+    const ageCol=a=>{ a=(a||'').toLowerCase(); return a.includes('historic')||a.includes('latest')?'#c92a2a' : a.startsWith('late')?'#f08c00':'#e0b100'; };
+    map.getSource('qk-faults').setData(fc((q.faults||[]).map(f=>({type:'Feature',properties:{color:ageCol(f.a.age)},geometry:{type:'MultiLineString',coordinates:f.paths}}))));
+    const z=q.zones||{}; const feats=[];
+    for(const [k,col] of [['liq','#6741d9'],['slide','#8d5524'],['ap','#c92a2a']]) for(const p of (z[k]||[])) feats.push({type:'Feature',properties:{color:col},geometry:esriToGeoJSON(p.rings)});
+    map.getSource('qk-zones').setData(fc(feats));
+  }
+
   // ---------- select & analyze ----------
   async function selectSite(lng,lat,label,kind,bbox){
     const token=++analyzeToken;
@@ -1190,12 +1360,13 @@ function main(){
       </div>${nriHtml()}`;
   }
 
-  function scenReadyNow(){ return !!(scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain) && (scenario!=='fire' || scen.fire)); }
+  function scenReadyNow(){ return !!(scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain) && (scenario!=='fire' || scen.fire) && (scenario!=='quake' || scen.quake?.curves?.[qkCfg.vs30])); }
   function scenarioHomeHtml(){
     const head=`<h2>This property</h2><div style="font-size:13px;margin-bottom:8px">${escapeHtml(site.label)}</div>`;
     const ready = scenReadyNow();
     if(!ready) return head+`<div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>${femaHtml()}${nriHtml()}`;
     if(scenario==='fire') return fireHomeHtml(head)+nriHtml();
+    if(scenario==='quake') return quakeHomeHtml(head)+nriHtml();
     const r=scenDepthAt(0,[site.lng,site.lat],site.groundM,'site'), k=classifyDepth(r.d, r.levee), C=CLASSES[k.cls];
     let rows='';
     if (scenario==='hurricane'){
@@ -1267,6 +1438,7 @@ function main(){
     const nOk=noaaOk();
     const scenReady = scenario!=='sea' && scenReadyNow();
     if (scenario==='fire' && scenReady){ renderFireArea(el); return; }
+    if (scenario==='quake' && scenReady){ renderQuakeArea(el); return; }
     if (scenario!=='sea' && !scenReady){
       el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2><div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>`;
       if (map.getSource('hit')) map.getSource('hit').setData(fc([])); return;
@@ -1364,10 +1536,13 @@ function main(){
     $('rainPanel').style.display = (v==='rain' || (v==='hurricane' && hurRain))?'':'none';
     $('hurPanel').style.display = v==='hurricane'?'':'none';
     $('firePanel').style.display = v==='fire'?'':'none';
+    $('quakePanel').style.display = v==='quake'?'':'none';
     runScenario();
   });
   for (const [id,key,num] of [['rainAri','ari',true],['rainDur','dur',false],['rainDrain','drain',false],['rainCover','cover',true]])
     $(id).addEventListener('change', e => { rainCfg[key] = num ? +e.target.value : e.target.value; runScenario(); });
+  $('qkYears').addEventListener('change', e => { qkCfg.years=+e.target.value; renderHome(); renderArea(); });
+  $('qkVs30').addEventListener('change', e => { qkCfg.vs30=+e.target.value; runScenario(); });
   $('catSeg').addEventListener('click', e => {
     const c=+e.target.dataset.c; if(!c||c===hurCat) return;
     hurCat=c; document.querySelectorAll('#catSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.c===c)); runScenario();

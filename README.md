@@ -18,9 +18,12 @@ Enter a home address or neighborhood (or click the map), drag the water-level sl
 | 🌊 **Sea / river level** | Water rising to a chosen level above sea level (sea-level rise, surge, river flood) | NOAA sea-level-rise maps or elevation only; FEMA zones & 100-year flood level |
 | 🌧️ **Heavy rain** | Rain that can't drain pooling in low spots ("pluvial" flooding), even far from water | NOAA Atlas 14 rainfall for the storm you pick (2–500-year, 1 hour–3 days) + USGS 3DEP lidar terrain |
 | 🌀 **Hurricane** | Storm surge for Category 1–5 at high tide, optionally plus the storm's rain | National Hurricane Center storm-surge hazard maps (SLOSH MOMs, v3) + USGS 3DEP + the rain model |
+| 🌎 **Earthquake** | Chance of strong, damaging, severe and violent shaking over 30/50/100 years for your soil type; the rare "design" earthquake; nearest active faults; California liquefaction, landslide and fault-rupture zones per building | USGS 2023 National Seismic Hazard Model (hazard web service), USGS Quaternary Fault and Fold Database, California Geological Survey seismic hazard zones |
 | 🔥 **Wildfire** | Wildfire risk to homes, chance of fire, fire intensity, and whether flames or embers can reach each building | USDA Forest Service Wildfire Risk to Communities (2024 data, 30 m) |
 
 Every property card also carries a **FEMA hazard scorecard**: the census tract's National Risk Index ratings for all hazards, coastal and inland flooding, hurricane, wildfire, earthquake, drought, heat wave, tornado and landslide.
+
+**How the earthquake scenario works:** the app asks the USGS hazard model for the yearly rate at which ground shaking (peak ground acceleration) is exceeded at the address, for the chosen soil type, and converts it into the chance over 30, 50 or 100 years of reaching each Modified Mercalli intensity (VI ≥ 0.092 g, VII ≥ 0.18 g, VIII ≥ 0.34 g, IX ≥ 0.65 g, per the USGS ShakeMap scale). Liquefaction and landslide zones are official California maps only so far; other states publish their own.
 
 **How the wildfire scenario works:** the Forest Service publishes its wildfire maps as image services whose values are rescaled for display (relative values preserved). So instead of showing made-up probabilities, the app ranks each building against all US land using each service's published histogram, and groups them as minimal / low (<40th percentile) / moderate (40–70th) / high (70–90th) / very high (>90th). Exposure is shown as direct (burnable vegetation at the building), indirect (embers and burning neighbors) or minimal.
 
@@ -50,6 +53,9 @@ Above 10 ft over high tide, or away from the coast, the NOAA model falls back to
 | Rainfall amounts by storm rarity and length | [NOAA Atlas 14](https://hdsc.nws.noaa.gov/pfds/) GIS grids, repackaged into `data/atlas14/` by the **Build Atlas 14 rainfall tiles** GitHub Action (NOAA's server doesn't allow browser requests) |
 | Terrain for rain ponding | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) ImageServer `exportImage` (float GeoTIFF, read with geotiff.js) |
 | Wildfire risk, likelihood, intensity, exposure | [USDA Forest Service Wildfire Risk to Communities](https://wildfirerisk.org) image services (via imagery.geoplatform.gov) |
+| Earthquake shaking odds | [USGS NSHM hazard web service](https://earthquake.usgs.gov/nshmp/) (CONUS 2023.R2, Alaska 2023, Hawaii 2021, PR/VI 2025) |
+| Active faults | [USGS Quaternary Fault and Fold Database](https://www.usgs.gov/programs/earthquake-hazards/faults) |
+| Liquefaction, landslide and fault-rupture zones (CA) | [California Geological Survey seismic hazard zones](https://www.conservation.ca.gov/cgs/geohazards/eq-zapp) |
 | Multi-hazard scorecard | [FEMA National Risk Index](https://hazards.fema.gov/nri/) census tracts (ArcGIS feature service) |
 | Hurricane storm surge (Cat 1–5) | [NOAA National Hurricane Center storm surge hazard maps](https://www.nhc.noaa.gov/nationalsurge/) (v3 tiles) |
 | Address search | [OpenStreetMap Nominatim](https://nominatim.org) |
