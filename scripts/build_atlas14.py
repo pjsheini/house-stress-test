@@ -80,7 +80,8 @@ def main():
         for f in files:
             m = pat.match(f)
             if m:
-                avail[(int(m.group(2)), m.group(3))] = f
+                dur = {"60m": "01h"}.get(m.group(3), m.group(3))   # NOAA names the 1-hour grids "60m"
+                avail.setdefault((int(m.group(2)), dur), f)
         print(f"{reg}: {len(avail)} matching grids", flush=True)
         for gi, (ari, dur) in enumerate(grids):
             f = avail.get((ari, dur))
