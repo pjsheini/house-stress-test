@@ -704,7 +704,7 @@ function main(){
   // ---- NOAA Atlas 14 rainfall (tiles built by .github/workflows/atlas14.yml) ----
   let atlasIdx=null; const atlasTiles=new Map();
   async function rainAt(lng,lat,ari,dur){
-    if(!atlasIdx) atlasIdx = await getJSON('data/atlas14/index.json');
+    if(!atlasIdx){ try{ atlasIdx = await getJSON('data/atlas14/index.json'); }catch(e){ return null; } }
     const gi = atlasIdx.grids.findIndex(g=>g.ari_years===ari && g.duration===dur); if(gi<0) return null;
     const T=atlasIdx.tile_deg, C=atlasIdx.cell_deg, N=atlasIdx.n;
     const lat0=Math.floor(lat/T)*T, lon0=Math.floor(lng/T)*T;
@@ -822,8 +822,7 @@ function main(){
     const my=++scenToken, s=site, needRain = scenario==='rain' || hurRain;
     if(!scen || scen.site!==s) scen={site:s};
     scenBusy=true; setScenStatus('Working…'); renderHome(); renderArea();
-    try{
-      if (needRain){
+    try{ if (needRain){
         const P=await rainAt(s.lng,s.lat,rainCfg.ari,rainCfg.dur);
         const cap = rainCfg.drain==='blocked' ? 0 : (await rainAt(s.lng,s.lat, rainCfg.drain==='good'?10:2, '01h')) || 0;  // drain capacity, inches per hour
         // Drains fail when rain falls faster than they carry it. Treat the storm as "nested": its worst
@@ -842,7 +841,9 @@ function main(){
             if(my!==scenToken) return; setScenStatus('Finding low spots where water collects…'); await new Promise(r=>setTimeout(r,30)); scen.dep=analyzeDepressions(scen.dem); }
           scen.pond=pondRain(scen.dem, scen.dep, excessIn*0.0254);
         }
-      } else scen.pond=null;
+      } else scen.pond=null; }
+    catch(e){ console.warn('rain scenario', e); scen.rain=scen.rain||{missing:true}; scen.pond=null; }
+    try{
       if (scenario==='hurricane'){
         if(!scen.hur || scen.hur.cat!==hurCat || scen.hur.blds!==buildings){
           const pts=[[s.lng,s.lat], ...buildings.map(b=>b.ct), ...areaGrid.map(o=>o.p)];
@@ -851,7 +852,7 @@ function main(){
           scen.hur={cat:hurCat, blds:buildings, cls, level:surgeLevel(grounds, cls)};
         }
       } else scen.hur=null;
-    }catch(e){ console.warn('scenario', e); if(my===scenToken) setScenStatus('Some data did not load: '+(e.message||e)); }
+    }catch(e){ console.warn('hurricane scenario', e); scen.hur={cat:hurCat, blds:buildings, cls:new Int8Array(1+buildings.length+areaGrid.length), level:null, failed:true}; }
     if(my!==scenToken) return;
     scenBusy=false; setScenStatus('');
     drawScenarioImage(); refreshOverlays(); renderHome(); renderArea(); updateScenarioPanel();
@@ -874,7 +875,7 @@ function main(){
       rn.textContent = st ? st : r?.missing ? 'NOAA Atlas 14 rainfall data isn\'t available for this spot (or is still being built).'
         : r ? `NOAA Atlas 14: a ${rainCfg.ari}-year, ${DUR_LABEL[rainCfg.dur]} storm drops ${r.P.toFixed(1)} in here. Drains carry off about ${r.drained.toFixed(1)} in; ${r.excessIn.toFixed(1)} in runs off into low spots.` : 'From NOAA Atlas 14 rainfall statistics for this location.'; }
     const hn=$('hurNote'); if(hn){ const st=hn.dataset.status;
-      hn.textContent = st ? st : `Storm surge from the National Hurricane Center's near-worst-case Category ${hurCat} map, arriving at high tide.` + (scen?.hur?.level!=null ? ` Estimated surge water level here: ${fmtLen(scen.hur.level)} above sea level.` : scen?.hur ? ' This area is outside the surge zone for this category.' : ''); }
+      hn.textContent = st ? st : scen?.hur?.failed ? 'The National Hurricane Center surge map did not load — try again in a moment.' : `Storm surge from the National Hurricane Center's near-worst-case Category ${hurCat} map, arriving at high tide.` + (scen?.hur?.level!=null ? ` Estimated surge water level here: ${fmtLen(scen.hur.level)} above sea level.` : scen?.hur ? ' This area is outside the surge zone for this category.' : ''); }
   }
   // depth (m) of water at a point for the active scenario, and whether NHC marks it as a levee area
   function scenDepthAt(i, pt, ground, kind){   // kind: 'site' | 'bld' | 'grid'
@@ -1046,9 +1047,10 @@ function main(){
       </div>`;
   }
 
+  function scenReadyNow(){ return !!(scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain)); }
   function scenarioHomeHtml(){
     const head=`<h2>This property</h2><div style="font-size:13px;margin-bottom:8px">${escapeHtml(site.label)}</div>`;
-    const ready = scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain);
+    const ready = scenReadyNow();
     if(!ready) return head+`<div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>${femaHtml()}`;
     const r=scenDepthAt(0,[site.lng,site.lat],site.groundM,'site'), k=classifyDepth(r.d, r.levee), C=CLASSES[k.cls];
     let rows='';
@@ -1117,7 +1119,7 @@ function main(){
     if (!site) return;
     const counts=CLASSES.map(()=>0), feats=[];
     const nOk=noaaOk();
-    const scenReady = scenario!=='sea' && scen && scen.site===site && !scenBusy;
+    const scenReady = scenario!=='sea' && scenReadyNow();
     if (scenario!=='sea' && !scenReady){
       el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2><div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>`;
       if (map.getSource('hit')) map.getSource('hit').setData(fc([])); return;
