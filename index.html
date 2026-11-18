@@ -68,6 +68,9 @@
   .sw i{width:14px;height:10px;border-radius:2px;display:inline-block}
   .fema{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
   .fema .zone{display:inline-block;font-weight:700;padding:2px 8px;border-radius:6px;color:#fff;font-size:12.5px;margin-right:6px}
+  .nri{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;margin-top:8px}
+  .nri div{display:flex;align-items:center;gap:6px;font-size:12px}
+  .nri i{width:10px;height:10px;border-radius:3px;flex:none}
   .chip.fema100{border-color:#2f6fde;color:#2f6fde;font-weight:600}
   #toast{position:absolute;right:14px;top:14px;background:#14202b;color:#fff;font-size:13px;padding:9px 12px;border-radius:9px;z-index:3;display:none;max-width:320px}
   @media (max-width:760px){
@@ -100,6 +103,7 @@
         <button data-s="sea" class="on">🌊 Sea / river level</button>
         <button data-s="rain">🌧️ Heavy rain</button>
         <button data-s="hurricane">🌀 Hurricane</button>
+        <button data-s="fire">🔥 Wildfire</button>
       </div>
     </div>
 
@@ -173,6 +177,13 @@
         </div>
         <div class="hint" id="hurNote">Storm surge from the National Hurricane Center's near-worst-case maps for this category, arriving at high tide.</div>
         <label class="check"><input type="checkbox" id="hurRain" checked> Add the storm's rain (uses the heavy-rain settings: 100-year, 24-hour by default)</label>
+      </div>
+    </div>
+
+    <div id="firePanel" style="display:none">
+      <div class="block">
+        <div class="label"><span>Wildfire</span></div>
+        <div class="hint" style="margin-top:0">Wildfire risk to homes, how likely a fire is, how intense it could get, and whether flames or embers could reach each building — from the USDA Forest Service <b>Wildfire Risk to Communities</b> maps (2024 data, 30 m). Each place is ranked against all land in the US.</div>
       </div>
     </div>
 
@@ -386,6 +397,8 @@ function main(){
         flood:{type:'raster',tileSize:256,maxzoom:15,tiles:[floodUrl()]},
         nhc:{type:'raster',tileSize:256,maxzoom:14,tiles:['https://tiles.arcgis.com/tiles/C8EMgrsFcRFL6LrL/arcgis/rest/services/Storm_Surge_HazardMaps_Category3_v3/MapServer/tile/{z}/{y}/{x}'],
           attribution:'Storm surge: <a href="https://www.nhc.noaa.gov/nationalsurge/">NOAA National Hurricane Center</a>'},
+        wfire:{type:'raster',tileSize:256,maxzoom:15,tiles:['wfire://{z}/{x}/{y}'],
+          attribution:'Wildfire: <a href="https://wildfirerisk.org">USDA Forest Service Wildfire Risk to Communities</a>'},
         noaa:{type:'raster',tileSize:256,maxzoom:16,tiles:[NOAA_SLR+'slr_3ft/MapServer/tile/{z}/{y}/{x}'],
           attribution:'Sea-level rise: <a href="https://coast.noaa.gov/slr/">NOAA Office for Coastal Management</a>'}
       },
@@ -394,7 +407,8 @@ function main(){
         {id:'hill',type:'hillshade',source:'dem',paint:{'hillshade-exaggeration':0.35,'hillshade-shadow-color':'#5a6570'}},
         {id:'flood',type:'raster',source:'flood',paint:{'raster-opacity':0.85,'raster-fade-duration':0}},
         {id:'noaa',type:'raster',source:'noaa',layout:{visibility:'none'},paint:{'raster-opacity':0.9,'raster-fade-duration':0}},
-        {id:'nhc',type:'raster',source:'nhc',layout:{visibility:'none'},paint:{'raster-opacity':0.6,'raster-fade-duration':0}}
+        {id:'nhc',type:'raster',source:'nhc',layout:{visibility:'none'},paint:{'raster-opacity':0.6,'raster-fade-duration':0}},
+        {id:'wfire',type:'raster',source:'wfire',layout:{visibility:'none'},paint:{'raster-opacity':0.7,'raster-fade-duration':0}}
       ]
     }
   });
@@ -418,7 +432,7 @@ function main(){
         map.addLayer({id:'bld',type:'fill-extrusion',source:'overture','source-layer':bldLayerName,minzoom:13,
           paint:{'fill-extrusion-color':'#d9dde2','fill-extrusion-height':h,'fill-extrusion-opacity':0.75}});
         map.addLayer({id:'bld-hit',type:'fill-extrusion',source:'hit',
-          paint:{'fill-extrusion-color':['match',['get','cls'],0,CLASSES[0].color,1,CLASSES[1].color,2,CLASSES[2].color,3,CLASSES[3].color,4,CLASSES[4].color,'#ccc'],
+          paint:{'fill-extrusion-color':['coalesce',['get','color'],['match',['get','cls'],0,CLASSES[0].color,1,CLASSES[1].color,2,CLASSES[2].color,3,CLASSES[3].color,4,CLASSES[4].color,5,CLASSES[5].color,'#ccc']],
                  'fill-extrusion-height':['get','h'],'fill-extrusion-opacity':0.92}});
         console.log('Overture buildings from', url, 'layer', bldLayerName, header.maxZoom);
         return true;
@@ -665,7 +679,8 @@ function main(){
       map.setLayoutProperty('nhc','visibility', showN?'visible':'none');
       if (showN && map.getSource('nhc').tiles?.[0]!==`${NHC(hurCat)}/tile/{z}/{y}/{x}`) map.getSource('nhc').setTiles([`${NHC(hurCat)}/tile/{z}/{y}/{x}`]);
     }
-    if (map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility', (!sea && scen?.pond)?'visible':'none');
+    if (map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility', (!sea && scenario!=='fire' && scen?.pond)?'visible':'none');
+    if (map.getLayer('wfire')) map.setLayoutProperty('wfire','visibility', scenario==='fire'?'visible':'none');
     updateScenLegend();
     if (map.getLayer('noaa')){
       const show = sea && model==='noaa' && st.kind==='ok';
@@ -828,6 +843,12 @@ function main(){
     const my=++scenToken, s=site, needRain = scenario==='rain' || hurRain;
     if(!scen || scen.site!==s) scen={site:s};
     scenBusy=true; setScenStatus('Working…'); renderHome(); renderArea();
+    if (scenario==='fire'){
+      try{ if(!scen.fire || scen.fire.blds!==buildings){ setScenStatus('Reading Forest Service wildfire maps…'); await runFire(); } }
+      catch(e){ console.warn('wildfire', e); scen.fire={failed:true, blds:buildings}; }
+      if(my!==scenToken) return;
+      scenBusy=false; setScenStatus(''); refreshOverlays(); renderHome(); renderArea(); updateScenarioPanel(); return;
+    }
     try{ if (needRain){
         const P=await rainAt(s.lng,s.lat,rainCfg.ari,rainCfg.dur);
         const cap = rainCfg.drain==='blocked' ? 0 : (await rainAt(s.lng,s.lat, rainCfg.drain==='good'?10:2, '01h')) || 0;  // drain capacity, inches per hour
@@ -872,7 +893,9 @@ function main(){
     let h='';
     if (scenario==='hurricane') h+=`<i style="background:rgb(0,92,230)"></i><span>Surge: under 3 ft above ground</span><i style="background:#ffff00"></i><span>Surge: more than 3 ft</span>
       <i style="background:#ffaa00"></i><span>Surge: more than 6 ft</span><i style="background:#ff0000"></i><span>Surge: more than 9 ft</span>`;
-    if (scen?.pond) h+=`<i style="background:rgb(80,170,255)"></i><span>Pooled rainwater: shallow</span><i style="background:rgb(20,60,195)"></i><span>Pooled rainwater: 3 ft or deeper</span>`;
+    if (scenario==='fire') h+=FIRE_CLASSES.map(C=>`<i style="background:${C.color}"></i><span>Buildings: ${C.name.toLowerCase()} wildfire risk</span>`).join('')
+      +`<i style="background:linear-gradient(90deg,#f1f2a0,#f2c13c,#e8590c)"></i><span>Map shading: Forest Service risk to homes (darker = higher)</span>`;
+    else if (scen?.pond) h+=`<i style="background:rgb(80,170,255)"></i><span>Pooled rainwater: shallow</span><i style="background:rgb(20,60,195)"></i><span>Pooled rainwater: 3 ft or deeper</span>`;
     el.innerHTML=h; el.style.display=h?'':'none';
   }
   function updateScenarioPanel(){
@@ -914,6 +937,117 @@ function main(){
     if(url) apply(url); else c.convertToBlob({type:'image/png'}).then(b=>{ const fr=new FileReader(); fr.onload=()=>apply(fr.result); fr.readAsDataURL(b); });
   }
 
+  // =====================================================================
+  //  Wildfire (USDA Forest Service Wildfire Risk to Communities) + FEMA National Risk Index
+  // =====================================================================
+  const WRC = svc => `https://imagery.geoplatform.gov/iipp/rest/services/Fire_Aviation/USFS_EDW_RMRS_WRC_${svc}/ImageServer`;
+  const NRI_URL = 'https://services.arcgis.com/XG15cJAlne2vxtgt/ArcGIS/rest/services/National_Risk_Index_Census_Tracts/FeatureServer/0';
+  const FIRE_CLASSES = [
+    {name:'Minimal', desc:'No meaningful wildfire risk to homes is mapped here.', color:'#9fb7a5'},
+    {name:'Low', desc:'Ranks below the 40th percentile of US land.', color:'#e9dd8a'},
+    {name:'Moderate', desc:'Ranks between the 40th and 70th percentile of US land.', color:'#f4a340'},
+    {name:'High', desc:'Ranks between the 70th and 90th percentile of US land.', color:'#e8590c'},
+    {name:'Very high', desc:'Riskier than 90% of US land.', color:'#a61e4d'},
+  ];
+  // The image services keep relative values only, so results are shown as national percentiles
+  // computed from each service's published histogram.
+  const wrcHist={};
+  function wrcHistogram(svc){
+    if(!wrcHist[svc]) wrcHist[svc]=getJSON(`${WRC(svc)}/histograms?f=json`).then(j=>{ const h=j.histograms[0];
+      const cum=new Float64Array(h.counts.length); let t=0; h.counts.forEach((c,i)=>{ t+=c; cum[i]=t; });
+      return {min:h.min, step:(h.max-h.min)/h.size, size:h.size, cum, total:t}; });
+    return wrcHist[svc]; }
+  function pctOf(h,v){ if(v==null||!isFinite(v)) return null; if(v<=0) return 0;
+    const i=Math.min(h.size-1, Math.max(0, Math.floor((v-h.min)/h.step))); return 100*(i>0?h.cum[i-1]:0)/h.total; }   // share of US land with a lower value
+  function fireClassOf(v,p){ if(!(v>0)||p==null) return 0; return p<40?1 : p<70?2 : p<90?3 : 4; }
+  function levelWord(p){ return p==null?'no data' : p<40?'lower than most places' : p<70?'moderate' : p<90?'high' : 'very high'; }
+  async function imgSamples(url, points){
+    const out=new Float64Array(points.length).fill(NaN), B=500; let next=0; const starts=[]; for(let i=0;i<points.length;i+=B) starts.push(i);
+    async function worker(){ while(next<starts.length){ const st=starts[next++];
+      const body=new URLSearchParams({geometry:JSON.stringify({points:points.slice(st,st+B),spatialReference:{wkid:4326}}),geometryType:'esriGeometryMultipoint',returnFirstValueOnly:'true',f:'json'});
+      try{ const j=await (await fetch(`${url}/getSamples`,{method:'POST',body})).json();
+        for(const x of (j.samples||[])){ const v=parseFloat(x.value); if(isFinite(v)) out[st+x.locationId]=v; } }catch(e){ console.warn('samples', url, e); } } }
+    await Promise.all([worker(),worker(),worker()]); return out; }
+  async function runFire(){
+    const s=site, blds=buildings, pts=[[s.lng,s.lat], ...blds.map(b=>b.ct)];
+    const [hR,hB,hC]=await Promise.all(['RiskToPotentialStructures','BurnProbability','ConditionalFlameLength'].map(wrcHistogram));
+    const [rps, exp, bp, cfl]=await Promise.all([imgSamples(WRC('RiskToPotentialStructures'),pts), imgSamples(WRC('ExposureType'),pts),
+      imgSamples(WRC('BurnProbability'),[pts[0]]), imgSamples(WRC('ConditionalFlameLength'),[pts[0]])]);
+    scen.fire={blds, rps, exp, rpsPct:Float32Array.from(rps,v=>pctOf(hR,v)??NaN), bpPct:pctOf(hB,bp[0]), cflPct:pctOf(hC,cfl[0])};
+  }
+  function exposureText(e){ if(!isFinite(e)) return 'no data';
+    if(!(e>0)) return 'Minimal — not near enough to burnable land for flames or embers to reach';
+    if(e>=999) return 'Direct — burnable vegetation is right at the property, so flames can reach the building';
+    return 'Indirect — no burnable vegetation on site, but embers and burning homes nearby can spread fire here'; }
+  function fireHomeHtml(head){
+    const f=scen.fire;
+    if(f.failed) return head+`<div class="loading">The Forest Service wildfire maps didn't respond — try again in a moment.</div>`+femaHtml()+nriHtml();
+    const p=f.rpsPct[0], k=fireClassOf(f.rps[0], isFinite(p)?p:null), C=FIRE_CLASSES[k];
+    return head+`<div class="status"><span class="badge" style="background:${C.color}"></span><b>Wildfire risk to homes: ${C.name}</b></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${C.desc}</div>
+      <div class="kv">
+        <span>Risk to a home here</span><span>${isFinite(p)?'higher than '+Math.round(p)+'% of US land':'—'}</span>
+        <span>Chance a wildfire reaches this spot</span><span>${levelWord(f.bpPct)}${f.bpPct!=null&&f.bpPct>0?' ('+Math.round(f.bpPct)+'th pct)':''}</span>
+        <span>How intense it would burn</span><span>${levelWord(f.cflPct)}${f.cflPct!=null&&f.cflPct>0?' ('+Math.round(f.cflPct)+'th pct)':''}</span>
+        <span style="grid-column:1/3">Exposure: ${exposureText(f.exp[0])}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">USDA Forest Service Wildfire Risk to Communities (2024 data). Its map services keep relative values, so results are ranks against all US land rather than exact yearly odds.</div>
+      ${femaHtml()}`;
+  }
+  function renderFireArea(el){
+    const f=scen.fire, counts=FIRE_CLASSES.map(()=>0), feats=[]; let direct=0, any=0;
+    if(!f.failed) buildings.forEach((b,i)=>{ const v=f.rps[1+i], p=f.rpsPct[1+i], k=fireClassOf(v, isFinite(p)?p:null); counts[k]++;
+      const e=f.exp[1+i]; if(e>=999) direct++; if(e>0) any++;
+      for(const g of b.geoms) feats.push({type:'Feature',geometry:g,properties:{cls:0,color:FIRE_CLASSES[k].color,h:b.h}}); });
+    if (map.getSource('hit')) map.getSource('hit').setData(fc(feats));
+    const nB=buildings.length, hi=counts[3]+counts[4];
+    const verdict = f.failed ? 'Wildfire data unavailable' : !nB ? '—' : hi/nB>0.5 ? 'Most buildings face high wildfire risk' : hi/nB>0.15 ? 'Many buildings face high wildfire risk'
+      : (counts[2]+hi)/nB>0.2 ? 'Some wildfire risk in the neighborhood' : any/nB>0.2 ? 'Low risk, but embers could reach some homes' : 'Little wildfire risk mapped here';
+    el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2>
+      <div class="status"><b>${verdict}</b></div>
+      <div class="kv">
+        <span>Buildings analyzed</span><span>${nB.toLocaleString()}</span>
+        <span>High or very high risk</span><span>${nB?Math.round(hi/nB*100)+'%':'—'}</span>
+        <span>Directly exposed (vegetation at the building)</span><span>${nB?Math.round(direct/nB*100)+'%':'—'}</span>
+        <span>Exposed to flames or embers</span><span>${nB?Math.round(any/nB*100)+'%':'—'}</span>
+      </div>
+      ${nB&&!f.failed?`<div class="bar">${counts.map((n,i)=>n?`<div title="${FIRE_CLASSES[i].name}: ${n}" style="width:${n/nB*100}%;background:${FIRE_CLASSES[i].color}"></div>`:'').join('')}</div>
+      <div class="legend">${FIRE_CLASSES.map((C,i)=>`<i style="background:${C.color}"></i><span>${C.name}</span><span>${counts[i].toLocaleString()}</span>`).join('')}</div>`:''}`;
+  }
+  // map overlay: Forest Service "risk to potential structures", with the no-risk white made transparent
+  maplibregl.addProtocol('wfire', async (params)=>{
+    const m=params.url.match(/wfire:\/\/(\d+)\/(\d+)\/(\d+)/); const z=+m[1], x=+m[2], y=+m[3];
+    const W=2*Math.PI*R_MERC, size=W/2**z, x0=-W/2+x*size, y1=W/2-y*size;
+    const u=`${WRC('RiskToPotentialStructures')}/exportImage?bbox=${x0},${y1-size},${x0+size},${y1}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image`;
+    const c=makeCanvas(256,256), g=c.getContext('2d');
+    try{ const bm=await createImageBitmap(await (await fetch(u)).blob()); g.drawImage(bm,0,0);
+      const img=g.getImageData(0,0,256,256), d=img.data;
+      for(let i=0;i<d.length;i+=4){ if(d[i]>235&&d[i+1]>235&&d[i+2]>235) d[i+3]=0; } g.putImageData(img,0,0); }catch(e){}
+    const blob = c.convertToBlob ? await c.convertToBlob({type:'image/png'}) : await new Promise(r=>c.toBlob(r,'image/png'));
+    return {data: await blob.arrayBuffer()};
+  });
+
+  // ---- FEMA National Risk Index scorecard (census tract) ----
+  let siteNri=null;
+  const NRI_HAZ=[['RISK_RATNG','All hazards'],['CFLD_RISKR','Coastal flood'],['IFLD_RISKR','Inland flood'],['HRCN_RISKR','Hurricane'],
+    ['WFIR_RISKR','Wildfire'],['ERQK_RISKR','Earthquake'],['DRGT_RISKR','Drought'],['HWAV_RISKR','Heat wave'],['TRND_RISKR','Tornado'],['LNDS_RISKR','Landslide']];
+  const NRI_COLOR={'Very High':'#a61e4d','Relatively High':'#e8590c','Relatively Moderate':'#f4a340','Relatively Low':'#b5cf8f','Very Low':'#8fb39a'};
+  async function nriForSite(lng,lat,token){
+    siteNri={loading:true};
+    try{ const j=await getJSON(`${NRI_URL}/query?geometry=${lng},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=${NRI_HAZ.map(h=>h[0]).join(',')},NRI_VER,TRACTFIPS,COUNTY,STATE&returnGeometry=false&f=json`);
+      if(token!==analyzeToken) return; siteNri=j.features?.[0]?.attributes || {none:true}; }
+    catch(e){ if(token===analyzeToken) siteNri={error:true}; }
+    renderHome();
+  }
+  function nriHtml(){
+    const a=siteNri; if(!a||a.loading) return `<div class="fema loading">Loading FEMA hazard scorecard…</div>`;
+    if(a.error||a.none) return '';
+    return `<div class="fema"><div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">FEMA hazard scorecard · census tract</div>
+      <div class="nri">${NRI_HAZ.map(([k,l])=>{ const v=a[k]||'—'; const col=NRI_COLOR[v]||'#d0d5db';
+        return `<div title="${escapeHtml(l)}: ${escapeHtml(v)}"><i style="background:${col}"></i><span><b>${l}</b>: ${escapeHtml(v.replace('Relatively ',''))}</span></div>`; }).join('')}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px">FEMA National Risk Index (${escapeHtml(a.NRI_VER||'')}) compares this tract with others nationwide; it covers the whole tract, not just this house.</div></div>`;
+  }
+
   // ---------- select & analyze ----------
   async function selectSite(lng,lat,label,kind,bbox){
     const token=++analyzeToken;
@@ -943,6 +1077,7 @@ function main(){
     renderHome();
     usgsSamples([[lng,lat]]).then(v=>{ if(token!==analyzeToken || !isFinite(v[0])) return; site.groundM=v[0]; site.elevSrc='usgs'; renderHome(); renderArea(); updateFemaButton(); });
     femaForProperty(lng,lat,token);
+    nriForSite(lng,lat,token);
 
     const pts=circle([lng,lat],radiusM,16);
     const b=pts.reduce((a,p)=>[Math.min(a[0],p[0]),Math.min(a[1],p[1]),Math.max(a[2],p[0]),Math.max(a[3],p[1])],[180,90,-180,-90]);
@@ -1052,14 +1187,15 @@ function main(){
         ${toGround>0 ? `<span>Margin before flooding</span><span style="color:#2b8a3e">${fmtLen(toGround)}</span>`
           : k.why ? `<span>Water level is above this ground by</span><span style="color:#b7791f">${fmtLen(-toGround)} — held back</span>`
           : `<span>Over the lot by</span><span style="color:#c92a2a">${fmtLen(-toGround)}</span>`}
-      </div>`;
+      </div>${nriHtml()}`;
   }
 
-  function scenReadyNow(){ return !!(scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain)); }
+  function scenReadyNow(){ return !!(scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain) && (scenario!=='fire' || scen.fire)); }
   function scenarioHomeHtml(){
     const head=`<h2>This property</h2><div style="font-size:13px;margin-bottom:8px">${escapeHtml(site.label)}</div>`;
     const ready = scenReadyNow();
-    if(!ready) return head+`<div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>${femaHtml()}`;
+    if(!ready) return head+`<div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>${femaHtml()}${nriHtml()}`;
+    if(scenario==='fire') return fireHomeHtml(head)+nriHtml();
     const r=scenDepthAt(0,[site.lng,site.lat],site.groundM,'site'), k=classifyDepth(r.d, r.levee), C=CLASSES[k.cls];
     let rows='';
     if (scenario==='hurricane'){
@@ -1083,7 +1219,7 @@ function main(){
     const desc = k.cls===5 ? 'The National Hurricane Center marks this as a levee area; it stays dry if the levees hold. Consult local officials.' : C.desc;
     return head+`<div class="status"><span class="badge" style="background:${C.color}"></span><b>${C.name}</b></div>
       <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${desc}</div>
-      <div class="kv">${rows}</div>${femaHtml()}`;
+      <div class="kv">${rows}</div>${femaHtml()}${nriHtml()}`;
   }
 
   function noaaOk(){ return model==='noaa' && noaaRes && noaaRes.site===site && noaaRes.blds===buildings; }
@@ -1130,6 +1266,7 @@ function main(){
     const counts=CLASSES.map(()=>0), feats=[];
     const nOk=noaaOk();
     const scenReady = scenario!=='sea' && scenReadyNow();
+    if (scenario==='fire' && scenReady){ renderFireArea(el); return; }
     if (scenario!=='sea' && !scenReady){
       el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2><div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>`;
       if (map.getSource('hit')) map.getSource('hit').setData(fc([])); return;
@@ -1226,6 +1363,7 @@ function main(){
     $('seaPanel').style.display = v==='sea'?'':'none';
     $('rainPanel').style.display = (v==='rain' || (v==='hurricane' && hurRain))?'':'none';
     $('hurPanel').style.display = v==='hurricane'?'':'none';
+    $('firePanel').style.display = v==='fire'?'':'none';
     runScenario();
   });
   for (const [id,key,num] of [['rainAri','ari',true],['rainDur','dur',false],['rainDrain','drain',false],['rainCover','cover',true]])

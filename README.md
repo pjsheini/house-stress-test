@@ -18,6 +18,11 @@ Enter a home address or neighborhood (or click the map), drag the water-level sl
 | 🌊 **Sea / river level** | Water rising to a chosen level above sea level (sea-level rise, surge, river flood) | NOAA sea-level-rise maps or elevation only; FEMA zones & 100-year flood level |
 | 🌧️ **Heavy rain** | Rain that can't drain pooling in low spots ("pluvial" flooding), even far from water | NOAA Atlas 14 rainfall for the storm you pick (2–500-year, 1 hour–3 days) + USGS 3DEP lidar terrain |
 | 🌀 **Hurricane** | Storm surge for Category 1–5 at high tide, optionally plus the storm's rain | National Hurricane Center storm-surge hazard maps (SLOSH MOMs, v3) + USGS 3DEP + the rain model |
+| 🔥 **Wildfire** | Wildfire risk to homes, chance of fire, fire intensity, and whether flames or embers can reach each building | USDA Forest Service Wildfire Risk to Communities (2024 data, 30 m) |
+
+Every property card also carries a **FEMA hazard scorecard**: the census tract's National Risk Index ratings for all hazards, coastal and inland flooding, hurricane, wildfire, earthquake, drought, heat wave, tornado and landslide.
+
+**How the wildfire scenario works:** the Forest Service publishes its wildfire maps as image services whose values are rescaled for display (relative values preserved). So instead of showing made-up probabilities, the app ranks each building against all US land using each service's published histogram, and groups them as minimal / low (<40th percentile) / moderate (40–70th) / high (70–90th) / very high (>90th). Exposure is shown as direct (burnable vegetation at the building), indirect (embers and burning neighbors) or minimal.
 
 **How the rain model works:** it downloads a ~4 m USGS lidar terrain grid around the property, fills every dip to find where water collects, traces which land drains into each dip, then pours in the rain that the storm drains can't carry and the ground doesn't absorb. Drains are assumed to handle a 2-year (typical) or 10-year (good) 1-hour storm, so what floods is the storm's worst burst above that capacity. It ignores pipes, culverts and overland spill from one dip to the next, so treat it as a screening estimate.
 
@@ -44,6 +49,8 @@ Above 10 ft over high tide, or away from the coast, the NOAA model falls back to
 | Datum conversion (NGVD29 → NAVD88, high tide → NAVD88) | [NOAA VDatum API](https://vdatum.noaa.gov/docs/services.html) |
 | Rainfall amounts by storm rarity and length | [NOAA Atlas 14](https://hdsc.nws.noaa.gov/pfds/) GIS grids, repackaged into `data/atlas14/` by the **Build Atlas 14 rainfall tiles** GitHub Action (NOAA's server doesn't allow browser requests) |
 | Terrain for rain ponding | [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) ImageServer `exportImage` (float GeoTIFF, read with geotiff.js) |
+| Wildfire risk, likelihood, intensity, exposure | [USDA Forest Service Wildfire Risk to Communities](https://wildfirerisk.org) image services (via imagery.geoplatform.gov) |
+| Multi-hazard scorecard | [FEMA National Risk Index](https://hazards.fema.gov/nri/) census tracts (ArcGIS feature service) |
 | Hurricane storm surge (Cat 1–5) | [NOAA National Hurricane Center storm surge hazard maps](https://www.nhc.noaa.gov/nationalsurge/) (v3 tiles) |
 | Address search | [OpenStreetMap Nominatim](https://nominatim.org) |
 | Basemap | © OpenStreetMap contributors, © CARTO |
