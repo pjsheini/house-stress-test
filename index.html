@@ -59,6 +59,7 @@
   canvas#curve{width:100%;height:120px;display:block;margin-top:8px}
   .note{font-size:11px;color:var(--muted);line-height:1.45;margin-top:16px}
   .loading{color:var(--muted);font-size:13px}
+  .sel{flex:1;min-width:0;padding:5px 6px;border:1px solid #cfd7df;border-radius:7px;font:inherit;font-size:12.5px;background:#fff}
   .check{display:flex;gap:8px;align-items:center;font-size:13px;margin-top:9px;cursor:pointer}
   .check input{accent-color:var(--accent);width:15px;height:15px}
   .seg.wide{display:flex;width:100%}
@@ -92,29 +93,92 @@
     <div class="hint">Or click anywhere on the map to test that spot.</div>
 
     <div class="block">
-      <div class="label"><span>Water level (above sea level)</span>
+      <div class="label"><span>Scenario</span>
         <span class="seg" id="unitSeg"><button data-u="ft" class="on">ft</button><button data-u="m">m</button></span>
       </div>
-      <div class="big" id="levelOut">8.0 <small>ft</small></div>
-      <input type="range" id="level" min="0" max="50" step="0.5" value="8">
-      <div class="row">
-        <button class="chip" data-ft="3">Sea-level rise ~2100 (3 ft)</button>
-        <button class="chip" data-ft="10">Hurricane surge (10 ft)</button>
-        <button class="chip" data-ft="20">Extreme (20 ft)</button>
-        <button class="chip" id="toHome">Water at my door</button>
-        <button class="chip fema100" id="fema100" style="display:none">FEMA 100-year flood</button>
+      <div class="seg wide" id="scenSeg">
+        <button data-s="sea" class="on">🌊 Sea / river level</button>
+        <button data-s="rain">🌧️ Heavy rain</button>
+        <button data-s="hurricane">🌀 Hurricane</button>
+      </div>
+    </div>
+
+    <div id="seaPanel">
+      <div class="block">
+        <div class="label"><span>Water level (above sea level)</span></div>
+        <div class="big" id="levelOut">8.0 <small>ft</small></div>
+        <input type="range" id="level" min="0" max="50" step="0.5" value="8">
+        <div class="row">
+          <button class="chip" data-ft="3">Sea-level rise ~2100 (3 ft)</button>
+          <button class="chip" data-ft="10">Storm surge (10 ft)</button>
+          <button class="chip" data-ft="20">Extreme (20 ft)</button>
+          <button class="chip" id="toHome">Water at my door</button>
+          <button class="chip fema100" id="fema100" style="display:none">FEMA 100-year flood</button>
+        </div>
+      </div>
+      <div class="block">
+        <div class="label"><span>Flood model</span></div>
+        <div class="seg wide" id="modelSeg">
+          <button data-m="noaa" class="on">NOAA · connected to sea</button>
+          <button data-m="bathtub">Elevation only</button>
+        </div>
+        <div class="hint" id="modelNote">Looking up local high tide from NOAA…</div>
+        <label class="check"><input type="checkbox" id="leveesHold" checked> Assume levees hold</label>
+      </div>
+    </div>
+
+    <div id="rainPanel" style="display:none">
+      <div class="block">
+        <div class="label"><span>Storm</span></div>
+        <div class="inline">How rare
+          <select id="rainAri" class="sel">
+            <option value="2">2-year (happens most years)</option>
+            <option value="10">10-year</option>
+            <option value="25">25-year</option>
+            <option value="100" selected>100-year (1% a year)</option>
+            <option value="500">500-year (0.2% a year)</option>
+          </select></div>
+        <div class="inline" style="margin-top:8px">How long
+          <select id="rainDur" class="sel">
+            <option value="01h">1 hour (thunderstorm)</option>
+            <option value="06h">6 hours</option>
+            <option value="24h" selected>24 hours (all-day storm)</option>
+            <option value="03d">3 days (stalled storm)</option>
+          </select></div>
+        <div class="big" id="rainOut" style="margin-top:10px">— <small>in of rain</small></div>
+        <div class="hint" id="rainNote">From NOAA Atlas 14 rainfall statistics for this location.</div>
+      </div>
+      <div class="block">
+        <div class="label"><span>Drainage</span></div>
+        <div class="inline">Storm drains
+          <select id="rainDrain" class="sel">
+            <option value="blocked">Blocked or overwhelmed</option>
+            <option value="typical" selected>Typical (handle a 2-year, 1-hour storm)</option>
+            <option value="good">Good (handle a 10-year, 1-hour storm)</option>
+          </select></div>
+        <div class="inline" style="margin-top:8px">Ground
+          <select id="rainCover" class="sel">
+            <option value="0.9">Mostly paved and roofs</option>
+            <option value="0.6" selected>Mixed (typical suburb)</option>
+            <option value="0.3">Mostly lawns and trees</option>
+          </select></div>
+      </div>
+    </div>
+
+    <div id="hurPanel" style="display:none">
+      <div class="block">
+        <div class="label"><span>Hurricane strength</span></div>
+        <div class="seg wide" id="catSeg">
+          <button data-c="1">Cat 1</button><button data-c="2">Cat 2</button><button data-c="3" class="on">Cat 3</button><button data-c="4">Cat 4</button><button data-c="5">Cat 5</button>
+        </div>
+        <div class="hint" id="hurNote">Storm surge from the National Hurricane Center's near-worst-case maps for this category, arriving at high tide.</div>
+        <label class="check"><input type="checkbox" id="hurRain" checked> Add the storm's rain (uses the heavy-rain settings: 100-year, 24-hour by default)</label>
       </div>
     </div>
 
     <div class="block">
-      <div class="label"><span>Flood model</span></div>
-      <div class="seg wide" id="modelSeg">
-        <button data-m="noaa" class="on">NOAA · connected to sea</button>
-        <button data-m="bathtub">Elevation only</button>
-      </div>
-      <div class="hint" id="modelNote">Looking up local high tide from NOAA…</div>
-      <label class="check"><input type="checkbox" id="showFema" checked> Show FEMA flood zones &amp; levees</label>
-      <label class="check"><input type="checkbox" id="leveesHold" checked> Assume levees hold</label>
+      <div class="label"><span>Map layers</span></div>
+      <label class="check" style="margin-top:0"><input type="checkbox" id="showFema" checked> Show FEMA flood zones &amp; levees</label>
       <div class="sw" id="femaLegend">
         <i style="background:#7b2cbf"></i><span>FEMA coastal high-risk (V/VE): 100-yr flood + waves</span>
         <i style="background:#2f6fde"></i><span>FEMA high-risk (A/AE/AO): 100-yr floodplain</span>
@@ -122,6 +186,7 @@
         <i style="background:#2a9d8f"></i><span>Behind a levee (reduced risk)</span>
         <i style="background:#6b3e26;height:4px"></i><span>Levee (FEMA)</span>
       </div>
+      <div class="sw" id="scenLegend" style="display:none"></div>
     </div>
 
     <div class="block">
@@ -319,6 +384,8 @@ function main(){
           tiles:[TERRARIUM+'{z}/{x}/{y}.png'],
           attribution:'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">AWS Terrain Tiles</a> (USGS 3DEP, SRTM, others)'},
         flood:{type:'raster',tileSize:256,maxzoom:15,tiles:[floodUrl()]},
+        nhc:{type:'raster',tileSize:256,maxzoom:14,tiles:['https://tiles.arcgis.com/tiles/C8EMgrsFcRFL6LrL/arcgis/rest/services/Storm_Surge_HazardMaps_Category3_v3/MapServer/tile/{z}/{y}/{x}'],
+          attribution:'Storm surge: <a href="https://www.nhc.noaa.gov/nationalsurge/">NOAA National Hurricane Center</a>'},
         noaa:{type:'raster',tileSize:256,maxzoom:16,tiles:[NOAA_SLR+'slr_3ft/MapServer/tile/{z}/{y}/{x}'],
           attribution:'Sea-level rise: <a href="https://coast.noaa.gov/slr/">NOAA Office for Coastal Management</a>'}
       },
@@ -326,7 +393,8 @@ function main(){
         {id:'carto',type:'raster',source:'carto'},
         {id:'hill',type:'hillshade',source:'dem',paint:{'hillshade-exaggeration':0.35,'hillshade-shadow-color':'#5a6570'}},
         {id:'flood',type:'raster',source:'flood',paint:{'raster-opacity':0.85,'raster-fade-duration':0}},
-        {id:'noaa',type:'raster',source:'noaa',layout:{visibility:'none'},paint:{'raster-opacity':0.9,'raster-fade-duration':0}}
+        {id:'noaa',type:'raster',source:'noaa',layout:{visibility:'none'},paint:{'raster-opacity':0.9,'raster-fade-duration':0}},
+        {id:'nhc',type:'raster',source:'nhc',layout:{visibility:'none'},paint:{'raster-opacity':0.6,'raster-fade-duration':0}}
       ]
     }
   });
@@ -588,12 +656,19 @@ function main(){
     renderHome(); renderArea();
   }
   function refreshOverlays(){
-    const st=noaaState();
+    const st=noaaState(), sea=scenario==='sea';
     const useNoaa = model==='noaa' && st.kind!=='above';
     const fs=map.getSource('flood'); if(fs) fs.setTiles([floodUrl()]);
-    if (map.getLayer('flood')) map.setLayoutProperty('flood','visibility', useNoaa?'none':'visible');
+    if (map.getLayer('flood')) map.setLayoutProperty('flood','visibility', (sea && !useNoaa)?'visible':'none');
+    if (map.getLayer('nhc')){
+      const showN = scenario==='hurricane';
+      map.setLayoutProperty('nhc','visibility', showN?'visible':'none');
+      if (showN && map.getSource('nhc').tiles?.[0]!==`${NHC(hurCat)}/tile/{z}/{y}/{x}`) map.getSource('nhc').setTiles([`${NHC(hurCat)}/tile/{z}/{y}/{x}`]);
+    }
+    if (map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility', (!sea && scen?.pond)?'visible':'none');
+    updateScenLegend();
     if (map.getLayer('noaa')){
-      const show = model==='noaa' && st.kind==='ok';
+      const show = sea && model==='noaa' && st.kind==='ok';
       map.setLayoutProperty('noaa','visibility', show?'visible':'none');
       if (show) map.getSource('noaa').setTiles([`${NOAA_SLR}${st.svc}/MapServer/tile/{z}/{y}/{x}`]);
     }
@@ -612,6 +687,233 @@ function main(){
       : hi+`Showing NOAA's map for ${st.v} ft above high tide. Only low areas connected to the sea flood.`;
   }
 
+  // =====================================================================
+  //  Scenarios: heavy rain (NOAA Atlas 14 + USGS 3DEP ponding) and hurricanes (NHC surge)
+  // =====================================================================
+  let scenario = 'sea';                         // 'sea' | 'rain' | 'hurricane'
+  const rainCfg = {ari:100, dur:'24h', drain:'typical', cover:0.6};
+  let hurCat = 3, hurRain = true;
+  const DUR_HOURS = {'01h':1, '06h':6, '24h':24, '03d':72};
+  const DUR_LABEL = {'01h':'1-hour', '06h':'6-hour', '24h':'24-hour', '03d':'3-day'};
+  const NHC = c => `https://tiles.arcgis.com/tiles/C8EMgrsFcRFL6LrL/arcgis/rest/services/Storm_Surge_HazardMaps_Category${c}_v3/MapServer`;
+  const SURGE_BINS_FT = [null,[0,3],[3,6],[6,9],[9,25]];   // NHC classes: <3, >3, >6, >9 ft above ground
+  const SURGE_LABEL = [null,'less than 3 ft','more than 3 ft','more than 6 ft','more than 9 ft'];
+  let scen = null;        // results for the current site: {rain:{...}, pond:{...}, hur:{...}}
+  let scenBusy = false, scenStatusText = '';
+
+  // ---- NOAA Atlas 14 rainfall (tiles built by .github/workflows/atlas14.yml) ----
+  let atlasIdx=null; const atlasTiles=new Map();
+  async function rainAt(lng,lat,ari,dur){
+    if(!atlasIdx){ try{ atlasIdx = await getJSON('data/atlas14/index.json'); }catch(e){ return null; } }
+    const gi = atlasIdx.grids.findIndex(g=>g.ari_years===ari && g.duration===dur); if(gi<0) return null;
+    const T=atlasIdx.tile_deg, C=atlasIdx.cell_deg, N=atlasIdx.n;
+    const lat0=Math.floor(lat/T)*T, lon0=Math.floor(lng/T)*T;
+    if(!atlasIdx.tiles.some(t=>t[0]===lat0 && t[1]===lon0)) return null;
+    const key=`${lat0}_${lon0}`;
+    if(!atlasTiles.has(key)) atlasTiles.set(key, fetch(`data/atlas14/t_${key}.bin`).then(r=>r.ok?r.arrayBuffer():null).then(b=>b&&new Uint16Array(b)));
+    const a=await atlasTiles.get(key); if(!a) return null;
+    const row=Math.floor((lat0+T-lat)/C), col=Math.floor((lng-lon0)/C);
+    for (let rad=0; rad<=2; rad++) for(let dr=-rad; dr<=rad; dr++) for(let dc=-rad; dc<=rad; dc++){   // step off coastline no-data cells
+      const r=row+dr, c=col+dc; if(r<0||c<0||r>=N||c>=N) continue;
+      const v=a[gi*N*N + r*N + c]; if(v!==atlasIdx.nodata) return v/100;
+    }
+    return null;
+  }
+
+  // ---- USGS 3DEP terrain grid around the site ----
+  const R_MERC = 6378137;
+  const toMerc = (lng,lat) => [lng*Math.PI/180*R_MERC, Math.log(Math.tan(Math.PI/4+lat*Math.PI/360))*R_MERC];
+  const fromMerc = (x,y) => [x/R_MERC*180/Math.PI, (2*Math.atan(Math.exp(y/R_MERC))-Math.PI/2)*180/Math.PI];
+  let GeoTIFF=null;
+  async function loadDem(c, radius){
+    if(!GeoTIFF) GeoTIFF = await import('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/+esm');
+    const cosl=Math.cos(c[1]*Math.PI/180), Rb=radius+400;                 // buffer so uphill catchments are included
+    const n=Math.min(900, Math.round(2*Rb/4));                             // ~4 m cells
+    const [X,Y]=toMerc(c[0],c[1]), half=Rb/cosl;
+    const u=`https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?bbox=${X-half},${Y-half},${X+half},${Y+half}&bboxSR=3857&imageSR=3857&size=${n},${n}&format=tiff&pixelType=F32&noData=-9999&noDataInterpretation=esriNoDataMatchAny&interpolation=RSP_BilinearInterpolation&f=image`;
+    const ac=new AbortController(); const t=setTimeout(()=>ac.abort(),45000);
+    const buf=await (await fetch(u,{signal:ac.signal})).arrayBuffer(); clearTimeout(t);
+    const img=await (await GeoTIFF.fromArrayBuffer(buf)).getImage();
+    const Z=Float32Array.from((await img.readRasters())[0], v=> v<-1000 ? NaN : v);
+    const pxm=2*half/n;
+    return {Z, n, X0:X-half, Y0:Y+half, pxm, cellArea:(pxm*cosl)**2,
+      cellOf(lng,lat){ const [x,y]=toMerc(lng,lat); const i=Math.floor((x-this.X0)/this.pxm), j=Math.floor((this.Y0-y)/this.pxm); return (i<0||j<0||i>=n||j>=n)?-1:j*n+i; },
+      corners(){ const e=this.X0+n*pxm, s=this.Y0-n*pxm; return [fromMerc(this.X0,this.Y0),fromMerc(e,this.Y0),fromMerc(e,s),fromMerc(this.X0,s)]; }};
+  }
+
+  // ---- depression ("bluespot") analysis: priority-flood fill, sinks and their catchments ----
+  function analyzeDepressions(dem){
+    const {Z,n}=dem, N=n*n, F=new Float32Array(N), closed=new Uint8Array(N);
+    // binary min-heap of cell indices keyed by F
+    const heap=new Int32Array(N); let hs=0;
+    const push=c=>{ let i=hs++; heap[i]=c; while(i>0){ const p=(i-1)>>1; if(F[heap[p]]<=F[heap[i]]) break; [heap[p],heap[i]]=[heap[i],heap[p]]; i=p; } };
+    const pop=()=>{ const top=heap[0]; heap[0]=heap[--hs]; let i=0; for(;;){ const l=2*i+1,r=l+1; let m=i;
+      if(l<hs && F[heap[l]]<F[heap[m]]) m=l; if(r<hs && F[heap[r]]<F[heap[m]]) m=r; if(m===i) break; [heap[m],heap[i]]=[heap[i],heap[m]]; i=m; } return top; };
+    const NB=[-n-1,-n,-n+1,-1,1,n-1,n,n+1];
+    for(let c=0;c<N;c++){ const x=c%n, y=(c/n)|0;
+      if(x===0||y===0||x===n-1||y===n-1||isNaN(Z[c])){ F[c]=isNaN(Z[c])?-1e9:Z[c]; closed[c]=1; push(c); } }
+    while(hs){ const c=pop(), x=c%n;
+      for(let k=0;k<8;k++){ const nb=c+NB[k]; if(nb<0||nb>=N) continue; const nx=nb%n; if(Math.abs(nx-x)>1||closed[nb]) continue;
+        closed[nb]=1; F[nb]=Math.max(Z[nb],F[c]); push(nb); } }
+    // label depressions (cells filled by > 2 cm)
+    const spot=new Int32Array(N); let ns=0; const spotCells=[null], spill=[0];
+    for(let c=0;c<N;c++){ if(spot[c]||!(F[c]-Z[c]>0.02)) continue; ns++; const cells=[]; const st=[c]; spot[c]=ns; let mx=-1e9;
+      while(st.length){ const a=st.pop(); cells.push(a); mx=Math.max(mx,F[a]); const ax=a%n;
+        for(let k=0;k<8;k++){ const b=a+NB[k]; if(b<0||b>=N||Math.abs(b%n-ax)>1||spot[b]||!(F[b]-Z[b]>0.02)) continue; spot[b]=ns; st.push(b); } }
+      cells.sort((p,q)=>Z[p]-Z[q]); spotCells.push(Int32Array.from(cells)); spill.push(mx); }
+    // catchments: follow steepest descent on the raw terrain until a depression (or the edge) is reached
+    const order=new Uint32Array(N); for(let i=0;i<N;i++) order[i]=i;
+    const Zs=Float32Array.from(Z, v=>isNaN(v)?-1e9:v); order.sort((a,b)=>Zs[a]-Zs[b]);
+    const lbl=new Int32Array(N), catchCells=new Float64Array(ns+1);
+    for(const c of order){ if(spot[c]){ lbl[c]=spot[c]; catchCells[spot[c]]++; continue; }
+      const x=c%n; let best=-1, bz=Zs[c];
+      for(let k=0;k<8;k++){ const b=c+NB[k]; if(b<0||b>=N||Math.abs(b%n-x)>1) continue; if(Zs[b]<bz){ bz=Zs[b]; best=b; } }
+      if(best>=0 && lbl[best]){ lbl[c]=lbl[best]; catchCells[lbl[c]]++; } }
+    return {spot, spotCells, spill, catchCells, ns};
+  }
+
+  // ---- fill each depression with the rain that runs off its catchment ----
+  function pondRain(dem, dep, excessM){
+    const {Z,n,cellArea}=dem, W=new Float32Array(n*n), level=new Float32Array(dep.ns+1), full=new Uint8Array(dep.ns+1);
+    for(let s=1;s<=dep.ns;s++){
+      const cells=dep.spotCells[s]; let V=excessM*dep.catchCells[s]*cellArea/cellArea;   // volume in "cell-metres"
+      let sum=0, h=Z[cells[0]];
+      for(let k=0;k<cells.length;k++){ sum+=Z[cells[k]]; const next = k+1<cells.length ? Z[cells[k+1]] : dep.spill[s];
+        const cap=(k+1)*next - sum;              // storage when water reaches the next cell's elevation
+        if(cap>=V){ h=(V+sum)/(k+1); break; }
+        h=next; if(k===cells.length-1) full[s]=1; }
+      h=Math.min(h, dep.spill[s]); level[s]=h;
+      for(const c of cells){ const d=h-Z[c]; if(d>0) W[c]=d; } }
+    return {W, level, full};
+  }
+
+  // ---- NHC storm-surge tiles (colour classes) ----
+  const nhcTiles=new Map();
+  function nhcTile(cat,z,x,y){ const key=`${cat}/${z}/${x}/${y}`; if(nhcTiles.has(key)) return nhcTiles.get(key);
+    const p=fetch(`${NHC(cat)}/tile/${z}/${y}/${x}`).then(r=>r.ok?r.blob():null).then(async b=>{ if(!b) return null;
+      const bm=await createImageBitmap(b), c=makeCanvas(256,256), g=c.getContext('2d',{willReadFrequently:true}); g.drawImage(bm,0,0); return g.getImageData(0,0,256,256).data; }).catch(()=>null);
+    nhcTiles.set(key,p); return p; }
+  const NHC_COLORS=[[1,0,92,230],[2,255,255,0],[3,255,170,0],[4,255,0,0]];
+  function nhcClass(d,px,py){ if(!d) return 0; const i=4*(py*256+px); if(d[i+3]<60) return 0;
+    let best=5, bd=60*60*3; for(const [k,r,g,b] of NHC_COLORS){ const e=(d[i]-r)**2+(d[i+1]-g)**2+(d[i+2]-b)**2; if(e<bd){ bd=e; best=k; } } return best; }  // 5 = levee area
+  async function sampleSurge(cat, pts){
+    const z=14, tiles=new Map(); for(const p of pts){ const t=tilePx(p[0],p[1],z); tiles.set(`${t.x}/${t.y}`,t); }
+    const arr=new Map(); await Promise.all([...tiles].map(([k,t])=>nhcTile(cat,z,t.x,t.y).then(d=>arr.set(k,d))));
+    return Int8Array.from(pts.map(p=>{ const t=tilePx(p[0],p[1],z); return nhcClass(arr.get(`${t.x}/${t.y}`),t.px,t.py); }));
+  }
+  // Surge water is nearly flat across a neighbourhood: find the water level most consistent with
+  // every sample's NHC depth class (ground from USGS 3DEP), then depth = level − ground within each class.
+  function surgeLevel(grounds, classes){
+    const ev=[]; for(let i=0;i<grounds.length;i++){ const k=classes[i]; if(k<1||k>4||!isFinite(grounds[i])) continue;
+      const [lo,hi]=SURGE_BINS_FT[k]; ev.push([grounds[i]+lo/FT, 1],[grounds[i]+hi/FT, -1]); }
+    if(!ev.length) return null;
+    ev.sort((a,b)=>a[0]-b[0] || b[1]-a[1]); let cur=0, best=-1, a=0, b=0;
+    for(let i=0;i<ev.length;i++){ cur+=ev[i][1]; if(cur>best){ best=cur; a=ev[i][0]; b=ev[i+1]?ev[i+1][0]:ev[i][0]; } }
+    const mid=(a+b)/2;
+    // plausible range: every level that agrees with at least 90% as many samples as the best level
+    cur=0; let lo=null, hi=null;
+    for(let i=0;i<ev.length;i++){ cur+=ev[i][1]; if(cur>=0.9*best){ if(lo==null) lo=ev[i][0]; hi=ev[i+1]?ev[i+1][0]:ev[i][0]; } }
+    lastSurgeRange=[lo??a, hi??b];
+    return mid;
+  }
+  let lastSurgeRange=null;
+  function surgeDepth(level, ground, k){ if(k<1||k>4) return 0; const [lo,hi]=SURGE_BINS_FT[k];
+    const d = level==null ? (lo+hi)/2/FT : level-ground; return Math.min(hi/FT, Math.max(lo/FT, d)); }
+
+  // ---- run whichever scenario is active ----
+  let scenToken=0;
+  async function runScenario(){
+    refreshOverlays();
+    if (scenario==='sea' || !site){ renderHome(); renderArea(); return; }
+    const my=++scenToken, s=site, needRain = scenario==='rain' || hurRain;
+    if(!scen || scen.site!==s) scen={site:s};
+    scenBusy=true; setScenStatus('Working…'); renderHome(); renderArea();
+    try{ if (needRain){
+        const P=await rainAt(s.lng,s.lat,rainCfg.ari,rainCfg.dur);
+        const cap = rainCfg.drain==='blocked' ? 0 : (await rainAt(s.lng,s.lat, rainCfg.drain==='good'?10:2, '01h')) || 0;  // drain capacity, inches per hour
+        // Drains fail when rain falls faster than they carry it. Treat the storm as "nested": its worst
+        // 1-hour, 6-hour… burst has the same rarity. Water that can't drain = worst burst minus capacity × burst length.
+        const subs=Object.keys(DUR_HOURS).filter(k=>DUR_HOURS[k]<=DUR_HOURS[rainCfg.dur]);
+        const Ps=await Promise.all(subs.map(k=>rainAt(s.lng,s.lat,rainCfg.ari,k)));
+        if(my!==scenToken) return;
+        if(P==null){ scen.rain={missing:true}; }
+        else {
+          let notDrained=0; subs.forEach((k,i)=>{ if(Ps[i]!=null) notDrained=Math.max(notDrained, Ps[i]-cap*DUR_HOURS[k]); });
+          notDrained=Math.min(P, Math.max(0,notDrained));
+          const drained=P-notDrained;
+          const excessIn=notDrained*rainCfg.cover;          // part that runs off instead of soaking in
+          scen.rain={P, cap, drained, excessIn};
+          if(!scen.dem || scen.demR!==radiusM){ setScenStatus('Downloading USGS lidar terrain…'); scen.dem=await loadDem([s.lng,s.lat], radiusM); scen.demR=radiusM;
+            if(my!==scenToken) return; setScenStatus('Finding low spots where water collects…'); await new Promise(r=>setTimeout(r,30)); scen.dep=analyzeDepressions(scen.dem); }
+          scen.pond=pondRain(scen.dem, scen.dep, excessIn*0.0254);
+        }
+      } else scen.pond=null; }
+    catch(e){ console.warn('rain scenario', e); scen.rain=scen.rain||{missing:true}; scen.pond=null; }
+    try{
+      if (scenario==='hurricane'){
+        if(!scen.hur || scen.hur.cat!==hurCat || scen.hur.blds!==buildings){
+          const pts=[[s.lng,s.lat], ...buildings.map(b=>b.ct), ...areaGrid.map(o=>o.p)];
+          const cls=await sampleSurge(hurCat, pts); if(my!==scenToken) return;
+          const grounds=[s.groundM, ...buildings.map(b=>b.groundM), ...areaGrid.map(o=>o.g)];
+          lastSurgeRange=null; const level=surgeLevel(grounds, cls);
+          scen.hur={cat:hurCat, blds:buildings, cls, level, range:lastSurgeRange};
+        }
+      } else scen.hur=null;
+    }catch(e){ console.warn('hurricane scenario', e); scen.hur={cat:hurCat, blds:buildings, cls:new Int8Array(1+buildings.length+areaGrid.length), level:null, failed:true}; }
+    if(my!==scenToken) return;
+    scenBusy=false; setScenStatus('');
+    drawScenarioImage(); refreshOverlays(); renderHome(); renderArea(); updateScenarioPanel();
+  }
+  function setScenStatus(t){ scenStatusText=t; const el=$('rainNote'); const h=$('hurNote');
+    if(scenario==='rain' && el) el.dataset.status=t; if(scenario==='hurricane' && h) h.dataset.status=t; updateScenarioPanel(); }
+  function updateScenLegend(){
+    const el=$('scenLegend'); if(!el) return;
+    if (scenario==='sea'){ el.style.display='none'; return; }
+    let h='';
+    if (scenario==='hurricane') h+=`<i style="background:rgb(0,92,230)"></i><span>Surge: under 3 ft above ground</span><i style="background:#ffff00"></i><span>Surge: more than 3 ft</span>
+      <i style="background:#ffaa00"></i><span>Surge: more than 6 ft</span><i style="background:#ff0000"></i><span>Surge: more than 9 ft</span>`;
+    if (scen?.pond) h+=`<i style="background:rgb(80,170,255)"></i><span>Pooled rainwater: shallow</span><i style="background:rgb(20,60,195)"></i><span>Pooled rainwater: 3 ft or deeper</span>`;
+    el.innerHTML=h; el.style.display=h?'':'none';
+  }
+  function updateScenarioPanel(){
+    const r=scen?.rain;
+    if($('rainOut')) $('rainOut').innerHTML = r&&r.P!=null ? `${r.P.toFixed(1)} <small>in of rain</small>` : `— <small>in of rain</small>`;
+    const rn=$('rainNote'); if(rn){ const st=rn.dataset.status;
+      rn.textContent = st ? st : r?.missing ? 'NOAA Atlas 14 rainfall data isn\'t available for this spot (or is still being built).'
+        : r ? `NOAA Atlas 14: a ${rainCfg.ari}-year, ${DUR_LABEL[rainCfg.dur]} storm drops ${r.P.toFixed(1)} in here. Drains carry off about ${r.drained.toFixed(1)} in, some soaks into the ground, and ${r.excessIn.toFixed(1)} in runs off into low spots.` : 'From NOAA Atlas 14 rainfall statistics for this location.'; }
+    const hn=$('hurNote'); if(hn){ const st=hn.dataset.status;
+      hn.textContent = st ? st : scen?.hur?.failed ? 'The National Hurricane Center surge map did not load — try again in a moment.' : `Storm surge from the National Hurricane Center's near-worst-case Category ${hurCat} map, arriving at high tide.` + (scen?.hur?.level!=null ? ` Surge water level here: about ${rangeTxt(scen.hur.range)} above sea level (estimated from NHC's depth classes and USGS ground heights).` : scen?.hur ? ' This area is outside the surge zone for this category.' : ''); }
+  }
+  // depth (m) of water at a point for the active scenario, and whether NHC marks it as a levee area
+  function scenDepthAt(i, pt, ground, kind){   // kind: 'site' | 'bld' | 'grid'
+    let d=0, levee=false, surge=0, pond=0;
+    if(scen?.hur){ const k = kind==='site' ? scen.hur.cls[0] : kind==='bld' ? scen.hur.cls[1+i] : scen.hur.cls[1+buildings.length+i];
+      if(k===5) levee=true; else surge=surgeDepth(scen.hur.level, ground, k); }
+    if(scen?.pond && scen.dem){ const c=scen.dem.cellOf(pt[0],pt[1]); if(c>=0){ const n=scen.dem.n;
+      for(const o of [0,-1,1,-n,n]){ const q=c+o; if(q>=0 && q<n*n) pond=Math.max(pond, scen.pond.W[q]); } } }
+    d=Math.max(surge,pond); return {d, levee, surge, pond};
+  }
+  function rangeTxt([a,b]){ const f=v=>units==='ft'?(v*FT).toFixed(0):v.toFixed(1); return f(a)===f(b) ? `${f(a)} ${units}` : `${f(a)}–${f(b)} ${units}`; }
+  function classifyDepth(d, levee){
+    if (levee && leveesHold) return {cls:5, atGround:0, inside:0, why:'levee'};
+    if (!(d>0.03)) return {cls:0, atGround:0, inside:0};
+    const inside=d-ffhM; if(inside<=0) return {cls:1, atGround:d, inside:0};
+    const f=inside*FT; return {cls: f<=2?2 : f<=6?3 : 4, atGround:d, inside};
+  }
+  function drawScenarioImage(){
+    const src=map.getSource('scenimg'); const W=scen?.pond?.W, dem=scen?.dem;
+    if(!W||!dem){ if(map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility','none'); return; }
+    const n=dem.n, c=makeCanvas(n,n), g=c.getContext('2d'), img=g.createImageData(n,n), d=img.data;
+    for(let i=0;i<n*n;i++){ const w=W[i]; if(!(w>0.03)) continue; const t=Math.min(w/1.0,1);
+      d[4*i]=Math.round(80-60*t); d[4*i+1]=Math.round(170-110*t); d[4*i+2]=Math.round(255-60*t); d[4*i+3]=Math.round(150+90*t); }
+    g.putImageData(img,0,0);
+    const url = c.convertToBlob ? null : c.toDataURL('image/png');
+    const apply = u => { if(src) src.updateImage({url:u, coordinates:dem.corners()});
+      else { map.addSource('scenimg',{type:'image',url:u,coordinates:dem.corners()}); map.addLayer({id:'scenimg',type:'raster',source:'scenimg',paint:{'raster-opacity':0.9,'raster-fade-duration':0}}, 'fema-fill'); }
+      map.setLayoutProperty('scenimg','visibility', scenario==='sea'?'none':'visible'); };
+    if(url) apply(url); else c.convertToBlob({type:'image/png'}).then(b=>{ const fr=new FileReader(); fr.onload=()=>apply(fr.result); fr.readAsDataURL(b); });
+  }
+
   // ---------- select & analyze ----------
   async function selectSite(lng,lat,label,kind,bbox){
     const token=++analyzeToken;
@@ -626,7 +928,8 @@ function main(){
     $('areaCard').innerHTML='<h2>Neighborhood</h2><div class="loading">Loading buildings…</div>';
     map.getSource('ring').setData(fc([{type:'Feature',geometry:{type:'LineString',coordinates:circle([lng,lat],radiusM)}}]));
     // reset official-map state for the new place
-    siteFema=null; femaZones=[]; leveedRings=[]; noaaRes=null; buildings=[]; updateFemaButton();
+    siteFema=null; femaZones=[]; leveedRings=[]; noaaRes=null; buildings=[]; scen=null; scenToken++; updateFemaButton();
+    if (map.getLayer('scenimg')) map.setLayoutProperty('scenimg','visibility','none');
     femaAreaPromise = femaForArea([lng,lat], radiusM, token).catch(e=>{ console.warn('FEMA area', e); toast('FEMA flood maps did not load for this area (their server may be slow). Elevation results still work.', 6000); });
     if (!mhhwFor || hav(mhhwFor,[lng,lat])>3000){
       mhhwM=null; mhhwLookup='loading'; mhhwFor=[lng,lat]; updateModelNote();
@@ -689,7 +992,9 @@ function main(){
       areaGrounds=areaGrid.map(o=>o.g);
       if (n > buildings.length*0.5) areaElevSrc='usgs';
       renderArea();
+      if (scenario!=='sea'){ if(scen) scen.hur=null; runScenario(); }   // surge depths depend on ground heights
     });
+    if (scenario!=='sea') runScenario();
     // attach FEMA zones to each building once FEMA answers
     if (femaAreaPromise) await femaAreaPromise;
     if (token!==analyzeToken) return;
@@ -728,6 +1033,7 @@ function main(){
     const el=$('homeCard');
     if (!site){ return; }
     if (!isFinite(site.groundM)){ el.innerHTML='<h2>This property</h2><div class="loading">No elevation data here.</div>'; return; }
+    if (scenario!=='sea'){ el.innerHTML=scenarioHomeHtml(); return; }
     const k=classify(site.groundM, siteCtx()), C=CLASSES[k.cls];
     const toGround=site.groundM-levelM, toInside=site.groundM+ffhM-levelM;
     const desc = k.why==='noaa' ? 'Low enough, but NOAA\'s map shows no connection to the sea here at this level' : C.desc;
@@ -747,6 +1053,37 @@ function main(){
           : k.why ? `<span>Water level is above this ground by</span><span style="color:#b7791f">${fmtLen(-toGround)} — held back</span>`
           : `<span>Over the lot by</span><span style="color:#c92a2a">${fmtLen(-toGround)}</span>`}
       </div>`;
+  }
+
+  function scenReadyNow(){ return !!(scen && scen.site===site && !scenBusy && (scenario!=='hurricane' || scen.hur) && (scenario!=='rain' || scen.rain)); }
+  function scenarioHomeHtml(){
+    const head=`<h2>This property</h2><div style="font-size:13px;margin-bottom:8px">${escapeHtml(site.label)}</div>`;
+    const ready = scenReadyNow();
+    if(!ready) return head+`<div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>${femaHtml()}`;
+    const r=scenDepthAt(0,[site.lng,site.lat],site.groundM,'site'), k=classifyDepth(r.d, r.levee), C=CLASSES[k.cls];
+    let rows='';
+    if (scenario==='hurricane'){
+      const cls=scen.hur.cls[0];
+      rows+=`<span>Storm surge (NHC Category ${hurCat})</span><span>${cls===5?'levee-protected area':cls>0?SURGE_LABEL[cls]+' above ground':'outside the surge zone'}</span>`;
+      if(cls>=1&&cls<=4){ const [lo,hi]=SURGE_BINS_FT[cls].map(v=>v/FT); const rg=scen.hur.range;
+        const dlo=rg?Math.max(lo,rg[0]-site.groundM):lo, dhi=rg?Math.min(hi,rg[1]-site.groundM):hi;
+        rows+=`<span>Estimated surge depth here</span><span style="color:#c92a2a">${dhi-dlo>0.3/FT ? rangeTxt([dlo,dhi]) : fmtLen(r.surge)}</span>`; }
+    }
+    if (scen.rain?.missing) rows+=`<span>Rain</span><span class="loading">no NOAA rainfall data here</span>`;
+    else if (scen.pond){
+      let spotTxt='';
+      if(scen.dem && scen.dep){ const c=scen.dem.cellOf(site.lng,site.lat); const sp=c>=0?scen.dep.spot[c]:0;
+        if(sp){ const acres=scen.dep.catchCells[sp]*scen.dem.cellArea/4046.86; spotTxt=`low spot that collects runoff from ~${acres<10?acres.toFixed(1):Math.round(acres)} acres${scen.pond.full[sp]?' (it fills up and overflows)':''}`; } }
+      rows+=`<span>Rainwater pooling here</span><span style="color:${r.pond>0.03?'#c92a2a':'#2b8a3e'}">${r.pond>0.03?fmtLen(r.pond):'none — water runs off'}</span>`;
+      if(spotTxt) rows+=`<span style="grid-column:1/3;font-size:11.5px">This lot sits in a ${spotTxt}.</span>`;
+    }
+    rows+=`<span>Water depth at ground</span><span>${k.atGround>0?fmtLen(k.atGround):'—'}</span>
+      <span>Water inside (est.)</span><span>${k.inside>0?fmtLen(k.inside):'—'}</span>
+      <span>Ground elevation ${site.elevSrc==='usgs'?'<small>(USGS 3DEP)</small>':''}</span><span>${fmtLen(site.groundM)}</span>`;
+    const desc = k.cls===5 ? 'The National Hurricane Center marks this as a levee area; it stays dry if the levees hold. Consult local officials.' : C.desc;
+    return head+`<div class="status"><span class="badge" style="background:${C.color}"></span><b>${C.name}</b></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:3px">${desc}</div>
+      <div class="kv">${rows}</div>${femaHtml()}`;
   }
 
   function noaaOk(){ return model==='noaa' && noaaRes && noaaRes.site===site && noaaRes.blds===buildings; }
@@ -792,15 +1129,24 @@ function main(){
     if (!site) return;
     const counts=CLASSES.map(()=>0), feats=[];
     const nOk=noaaOk();
+    const scenReady = scenario!=='sea' && scenReadyNow();
+    if (scenario!=='sea' && !scenReady){
+      el.innerHTML=`<h2>Neighborhood · ${radiusM} m radius</h2><div class="loading">${escapeHtml(scenStatusText||'Running scenario…')}</div>`;
+      if (map.getSource('hit')) map.getSource('hit').setData(fc([])); return;
+    }
     buildings.forEach((b,i)=>{
-      const k=classify(b.groundM, {leveed:b.fema?.cat==='levee', noaa: nOk ? noaaRes.bld[i] : undefined}); counts[k.cls]++;
+      let k;
+      if (scenReady){ const r=scenDepthAt(i,b.ct,b.groundM,'bld'); k=classifyDepth(r.d, r.levee); }
+      else k=classify(b.groundM, {leveed:b.fema?.cat==='levee', noaa: nOk ? noaaRes.bld[i] : undefined});
+      counts[k.cls]++;
       for(const g of b.geoms) feats.push({type:'Feature',geometry:g,properties:{cls:k.cls,h:b.h}});
     });
     if (map.getSource('hit')) map.getSource('hit').setData(fc(feats));
     const nB=buildings.length, wet=nB-counts[0]-counts[5];
     const gridOk = nOk && noaaRes.gridRef===areaGrid;
-    const landWet = areaGrid.length ? areaGrid.filter((o,i)=>{
-      const c=classify(o.g,{leveed:o.fema?.cat==='levee', noaa: gridOk?noaaRes.grid[i]:undefined}).cls; return c>0 && c!==5; }).length/areaGrid.length : 0;
+    const landWet = !areaGrid.length ? 0 : scenReady
+      ? areaGrid.filter((o,i)=>{ const r=scenDepthAt(i,o.p,o.g,'grid'); return r.d>0.03 && !(r.levee&&leveesHold); }).length/areaGrid.length
+      : areaGrid.filter((o,i)=>{ const c=classify(o.g,{leveed:o.fema?.cat==='levee', noaa: gridOk?noaaRes.grid[i]:undefined}).cls; return c>0 && c!==5; }).length/areaGrid.length;
     const flooded = counts[2]+counts[3]+counts[4];
     const femaReady = buildings.some(b=>'fema' in b);
     const inHigh = buildings.filter(b=>b.fema && (b.fema.cat==='high'||b.fema.cat==='coastal')).length;
@@ -823,8 +1169,8 @@ function main(){
       ${nB?`<div class="bar">${counts.map((n,i)=>n?`<div title="${CLASSES[i].name}: ${n}" style="width:${n/nB*100}%;background:${CLASSES[i].color}"></div>`:'').join('')}</div>
       <div class="legend">${CLASSES.map((C,i)=>`<i style="background:${C.color}"></i><span>${C.name}</span><span>${counts[i].toLocaleString()}</span>`).join('')}</div>`
       :`<div class="loading" style="margin-top:8px">No Overture buildings loaded here — zoom in or check your connection.</div>`}
-      <div class="label" style="margin-top:14px"><span>% of buildings with water inside vs. water level</span></div>
-      <canvas id="curve"></canvas>`;
+      ${scenario==='sea' ? `<div class="label" style="margin-top:14px"><span>% of buildings with water inside vs. water level</span></div>
+      <canvas id="curve"></canvas>` : ''}`;
     drawCurve();
   }
 
@@ -855,7 +1201,7 @@ function main(){
   function updateLevelUI(){
     const v = units==='ft' ? levelM*FT : levelM;
     $('levelOut').innerHTML = `${v.toFixed(units==='ft'?1:2)} <small>${units}</small>`;
-    updateFemaButton(); updateModelNote();
+    updateFemaButton(); updateModelNote(); if (typeof updateScenarioPanel==="function") updateScenarioPanel();
   }
   function setLevel(m, fromSlider){
     levelM=Math.max(0,m);
@@ -874,6 +1220,21 @@ function main(){
     document.querySelectorAll('.uLbl').forEach(s=>s.textContent=u);
     setLevel(levelM);
   });
+  $('scenSeg').addEventListener('click', e => {
+    const v=e.target.dataset.s; if(!v||v===scenario) return;
+    scenario=v; document.querySelectorAll('#scenSeg button').forEach(b=>b.classList.toggle('on',b.dataset.s===v));
+    $('seaPanel').style.display = v==='sea'?'':'none';
+    $('rainPanel').style.display = (v==='rain' || (v==='hurricane' && hurRain))?'':'none';
+    $('hurPanel').style.display = v==='hurricane'?'':'none';
+    runScenario();
+  });
+  for (const [id,key,num] of [['rainAri','ari',true],['rainDur','dur',false],['rainDrain','drain',false],['rainCover','cover',true]])
+    $(id).addEventListener('change', e => { rainCfg[key] = num ? +e.target.value : e.target.value; runScenario(); });
+  $('catSeg').addEventListener('click', e => {
+    const c=+e.target.dataset.c; if(!c||c===hurCat) return;
+    hurCat=c; document.querySelectorAll('#catSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.c===c)); runScenario();
+  });
+  $('hurRain').addEventListener('change', e => { hurRain=e.target.checked; $('rainPanel').style.display=hurRain?'':'none'; runScenario(); });
   $('modelSeg').addEventListener('click', e => {
     const m=e.target.dataset.m; if(!m||m===model) return;
     model=m; document.querySelectorAll('#modelSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
