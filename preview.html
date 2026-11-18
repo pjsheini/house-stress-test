@@ -809,8 +809,10 @@ function main(){
     if(!ev.length) return null;
     ev.sort((a,b)=>a[0]-b[0] || b[1]-a[1]); let cur=0, best=-1, a=0, b=0;
     for(let i=0;i<ev.length;i++){ cur+=ev[i][1]; if(cur>best){ best=cur; a=ev[i][0]; b=ev[i+1]?ev[i+1][0]:ev[i][0]; } }
+    lastSurgeRange=[a,b];
     return (a+b)/2;
   }
+  let lastSurgeRange=null;
   function surgeDepth(level, ground, k){ if(k<1||k>4) return 0; const [lo,hi]=SURGE_BINS_FT[k];
     const d = level==null ? (lo+hi)/2/FT : level-ground; return Math.min(hi/FT, Math.max(lo/FT, d)); }
 
@@ -849,7 +851,8 @@ function main(){
           const pts=[[s.lng,s.lat], ...buildings.map(b=>b.ct), ...areaGrid.map(o=>o.p)];
           const cls=await sampleSurge(hurCat, pts); if(my!==scenToken) return;
           const grounds=[s.groundM, ...buildings.map(b=>b.groundM), ...areaGrid.map(o=>o.g)];
-          scen.hur={cat:hurCat, blds:buildings, cls, level:surgeLevel(grounds, cls)};
+          lastSurgeRange=null; const level=surgeLevel(grounds, cls);
+          scen.hur={cat:hurCat, blds:buildings, cls, level, range:lastSurgeRange};
         }
       } else scen.hur=null;
     }catch(e){ console.warn('hurricane scenario', e); scen.hur={cat:hurCat, blds:buildings, cls:new Int8Array(1+buildings.length+areaGrid.length), level:null, failed:true}; }
@@ -875,7 +878,7 @@ function main(){
       rn.textContent = st ? st : r?.missing ? 'NOAA Atlas 14 rainfall data isn\'t available for this spot (or is still being built).'
         : r ? `NOAA Atlas 14: a ${rainCfg.ari}-year, ${DUR_LABEL[rainCfg.dur]} storm drops ${r.P.toFixed(1)} in here. Drains carry off about ${r.drained.toFixed(1)} in; ${r.excessIn.toFixed(1)} in runs off into low spots.` : 'From NOAA Atlas 14 rainfall statistics for this location.'; }
     const hn=$('hurNote'); if(hn){ const st=hn.dataset.status;
-      hn.textContent = st ? st : scen?.hur?.failed ? 'The National Hurricane Center surge map did not load — try again in a moment.' : `Storm surge from the National Hurricane Center's near-worst-case Category ${hurCat} map, arriving at high tide.` + (scen?.hur?.level!=null ? ` Estimated surge water level here: ${fmtLen(scen.hur.level)} above sea level.` : scen?.hur ? ' This area is outside the surge zone for this category.' : ''); }
+      hn.textContent = st ? st : scen?.hur?.failed ? 'The National Hurricane Center surge map did not load — try again in a moment.' : `Storm surge from the National Hurricane Center's near-worst-case Category ${hurCat} map, arriving at high tide.` + (scen?.hur?.level!=null ? ` Surge water level here: about ${rangeTxt(scen.hur.range)} above sea level (estimated from NHC's depth classes and USGS ground heights).` : scen?.hur ? ' This area is outside the surge zone for this category.' : ''); }
   }
   // depth (m) of water at a point for the active scenario, and whether NHC marks it as a levee area
   function scenDepthAt(i, pt, ground, kind){   // kind: 'site' | 'bld' | 'grid'
@@ -886,6 +889,7 @@ function main(){
       for(const o of [0,-1,1,-n,n]){ const q=c+o; if(q>=0 && q<n*n) pond=Math.max(pond, scen.pond.W[q]); } } }
     d=Math.max(surge,pond); return {d, levee, surge, pond};
   }
+  function rangeTxt([a,b]){ const f=v=>units==='ft'?(v*FT).toFixed(0):v.toFixed(1); return `${f(a)}–${f(b)} ${units}`; }
   function classifyDepth(d, levee){
     if (levee && leveesHold) return {cls:5, atGround:0, inside:0, why:'levee'};
     if (!(d>0.03)) return {cls:0, atGround:0, inside:0};
@@ -1057,7 +1061,9 @@ function main(){
     if (scenario==='hurricane'){
       const cls=scen.hur.cls[0];
       rows+=`<span>Storm surge (NHC Category ${hurCat})</span><span>${cls===5?'levee-protected area':cls>0?SURGE_LABEL[cls]+' above ground':'outside the surge zone'}</span>`;
-      if(cls>=1&&cls<=4) rows+=`<span>Estimated surge depth here</span><span style="color:#c92a2a">${fmtLen(r.surge)}</span>`;
+      if(cls>=1&&cls<=4){ const [lo,hi]=SURGE_BINS_FT[cls].map(v=>v/FT); const rg=scen.hur.range;
+        const dlo=rg?Math.max(lo,rg[0]-site.groundM):lo, dhi=rg?Math.min(hi,rg[1]-site.groundM):hi;
+        rows+=`<span>Estimated surge depth here</span><span style="color:#c92a2a">${dhi-dlo>0.3/FT ? rangeTxt([dlo,dhi]) : fmtLen(r.surge)}</span>`; }
     }
     if (scen.rain?.missing) rows+=`<span>Rain</span><span class="loading">no NOAA rainfall data here</span>`;
     else if (scen.pond){
